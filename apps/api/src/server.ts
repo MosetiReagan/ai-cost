@@ -14,7 +14,14 @@ export interface ApiServerOptions {
 
 export function buildApiServer(options: ApiServerOptions): FastifyInstance {
   const { repo } = options;
-  const jwtSecret = options.jwtSecret || process.env.JWT_SECRET || 'ai-cost-super-secret-key-change-in-production';
+  const rawJwtSecret = options.jwtSecret || process.env.JWT_SECRET;
+  if (!rawJwtSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET is required in production environments. Set it to a strong random secret (32+ characters).');
+    }
+    console.warn('[ai-cost/api] WARNING: Running with fallback JWT secret. Set JWT_SECRET in production.');
+  }
+  const effectiveJwtSecret = rawJwtSecret || 'ai-cost-dev-insecure-jwt-secret-do-not-use-in-production';
 
   const server = Fastify({
     logger: options.logger ?? false
@@ -27,7 +34,7 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
   });
 
   server.register(jwt, {
-    secret: jwtSecret
+    secret: effectiveJwtSecret
   });
 
   // Auth decorator

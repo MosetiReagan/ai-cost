@@ -206,4 +206,17 @@ describe('AI Cost API Server', () => {
     const pricingList = JSON.parse(getPricingRes.body);
     expect(pricingList.custom.some((c: any) => c.model === 'llama-fine-tuned')).toBe(true);
   });
+
+  it('refuses to start in production if JWT_SECRET is missing', () => {
+    const originalEnv = process.env.NODE_ENV;
+    const originalSecret = process.env.JWT_SECRET;
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.JWT_SECRET;
+      expect(() => buildApiServer({ repo, logger: false })).toThrow(/JWT_SECRET is required in production/);
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalSecret) process.env.JWT_SECRET = originalSecret;
+    }
+  });
 });
