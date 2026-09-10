@@ -85,7 +85,19 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
       return reply.status(400).send({ error: 'System has already been set up. Please log in.' });
     }
 
+    const setupToken = process.env.AI_COST_SETUP_TOKEN;
     const body = request.body as any;
+    if (setupToken) {
+      const providedToken = body?.setupToken || (request.headers['x-setup-token'] as string);
+      if (providedToken !== setupToken) {
+        return reply.status(403).send({ error: 'Invalid setup token. Please provide the configured AI_COST_SETUP_TOKEN.' });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      return reply.status(503).send({
+        error: 'Initial setup requires AI_COST_SETUP_TOKEN to be configured in production environments.'
+      });
+    }
+
     const email = body?.email?.trim();
     const password = body?.password;
     const name = body?.name?.trim() || 'Administrator';

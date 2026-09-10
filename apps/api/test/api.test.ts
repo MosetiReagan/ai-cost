@@ -45,6 +45,14 @@ describe('AI Cost API Server', () => {
     expect(body.token).toBeDefined();
 
     authToken = body.token;
+
+    // Verify subsequent setup attempts are rejected once initialized
+    const secondSetup = await server.inject({
+      method: 'POST',
+      url: '/api/auth/setup',
+      payload: { email: 'attacker@test.org', password: 'password123' }
+    });
+    expect(secondSetup.statusCode).toBe(400);
   });
 
   it('authenticates user via login', async () => {
