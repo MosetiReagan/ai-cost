@@ -14,8 +14,59 @@ import {
 
 const API_BASE = '/api';
 
+type AuthExpiredCallback = () => void;
+const authExpiredListeners = new Set<AuthExpiredCallback>();
+
+export function onAuthExpired(cb: AuthExpiredCallback): () => void {
+  authExpiredListeners.add(cb);
+  return () => {
+    authExpiredListeners.delete(cb);
+  };
+}
+
+function notifyAuthExpired() {
+  authExpiredListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+/**
+ * Checks whether a JWT token string has expired based on its standard exp claim.
+ */
+export function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return true;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    if (!payload.exp) return false;
+    // Expired if current time + 10s skew exceeds exp timestamp
+    return payload.exp * 1000 <= Date.now() + 10000;
+  } catch {
+    return true;
+  }
+}
+
 export function getAuthToken(): string | null {
-  return localStorage.getItem('ai_cost_token');
+  const token = localStorage.getItem('ai_cost_token');
+  if (!token) return null;
+  if (isTokenExpired(token)) {
+    clearAuthToken();
+    notifyAuthExpired();
+    return null;
+  }
+  return token;
 }
 
 export function setAuthToken(token: string) {
@@ -43,6 +94,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      clearAuthToken();
+      notifyAuthExpired();
+    }
     const errorData = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(errorData.error || `HTTP ${res.status}`);
   }

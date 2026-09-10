@@ -8,7 +8,8 @@ import { ProjectsView } from './components/ProjectsView';
 import { BudgetsView } from './components/BudgetsView';
 import { PricingView } from './components/PricingView';
 import { SetupModal } from './components/SetupModal';
-import { api } from './api';
+import { LoginModal } from './components/LoginModal';
+import { api, getAuthToken, onAuthExpired } from './api';
 import {
   Project,
   OverviewMetrics,
@@ -22,6 +23,7 @@ import {
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isSetupNeeded, setIsSetupNeeded] = useState<boolean | null>(null);
+  const [isLoginNeeded, setIsLoginNeeded] = useState<boolean>(false);
 
   // Filter state
   const [projects, setProjects] = useState<Project[]>([]);
@@ -48,11 +50,18 @@ export const App: React.FC = () => {
   const [insights, setInsights] = useState<CostInsight[]>([]);
   const [recentRequests, setRecentRequests] = useState<AIRequestItem[]>([]);
 
-  // Check setup status on load
+  // Check setup status and authentication on load
   const checkStatus = async () => {
     try {
       const res = await api.checkStatus();
-      setIsSetupNeeded(!res.isSetup);
+      if (!res.isSetup) {
+        setIsSetupNeeded(true);
+      } else {
+        setIsSetupNeeded(false);
+        if (!getAuthToken()) {
+          setIsLoginNeeded(true);
+        }
+      }
     } catch {
       // If API not reachable yet, don't show setup modal immediately
       setIsSetupNeeded(false);
@@ -118,6 +127,11 @@ export const App: React.FC = () => {
   useEffect(() => {
     checkStatus();
     loadProjects();
+
+    const unsubscribe = onAuthExpired(() => {
+      setIsLoginNeeded(true);
+    });
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -171,6 +185,17 @@ export const App: React.FC = () => {
         <SetupModal
           onCompleted={() => {
             setIsSetupNeeded(false);
+            loadProjects();
+            loadOverviewData();
+          }}
+        />
+      )}
+
+      {/* Login modal if session is unauthenticated or expired */}
+      {isLoginNeeded && !isSetupNeeded && (
+        <LoginModal
+          onCompleted={() => {
+            setIsLoginNeeded(false);
             loadProjects();
             loadOverviewData();
           }}
