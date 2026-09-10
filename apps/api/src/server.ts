@@ -133,12 +133,17 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
       hashedKey: keyData.hashedKey
     });
 
-    const token = server.jwt.sign({
-      userId: user.id,
-      email: user.email,
-      organizationId: org.id,
-      role: user.role
-    });
+    const token = server.jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        organizationId: org.id,
+        role: user.role
+      },
+      {
+        expiresIn: '24h'
+      }
+    );
 
     return {
       user,
@@ -168,12 +173,17 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
       return reply.status(401).send({ error: 'Invalid email or password.' });
     }
 
-    const token = server.jwt.sign({
-      userId: user.id,
-      email: user.email,
-      organizationId: user.organization_id,
-      role: user.role
-    });
+    const token = server.jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        organizationId: user.organization_id,
+        role: user.role
+      },
+      {
+        expiresIn: '24h'
+      }
+    );
 
     return {
       token,

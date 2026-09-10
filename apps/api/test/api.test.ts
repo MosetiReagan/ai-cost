@@ -69,6 +69,11 @@ describe('AI Cost API Server', () => {
     const body = JSON.parse(loginRes.body);
     expect(body.token).toBeDefined();
     expect(body.user.email).toBe('admin@test.org');
+
+    const decoded: any = server.jwt.decode(body.token);
+    expect(decoded.exp).toBeDefined();
+    expect(decoded.iat).toBeDefined();
+    expect(decoded.exp - decoded.iat).toBe(86400); // 24 hours in seconds
   });
 
   it('creates project and generates API key', async () => {
