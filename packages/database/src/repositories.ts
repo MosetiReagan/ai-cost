@@ -35,6 +35,11 @@ export class Repository {
     return res.rows[0] || null;
   }
 
+  async getOrganizationById(id: string): Promise<any | null> {
+    const res = await this.db.query(`SELECT * FROM organizations WHERE id = $1`, [id]);
+    return res.rows[0] || null;
+  }
+
   async createUser(data: { organizationId: string; email: string; passwordHash: string; name: string; role?: string }): Promise<any> {
     const id = randomUUID();
     const role = data.role || 'member';
@@ -166,6 +171,29 @@ export class Repository {
     };
   }
 
+  async getApiKeyById(id: string): Promise<(ApiKey & { organizationId: string }) | null> {
+    const res = await this.db.query<any>(
+      `SELECT k.*, p.organization_id
+       FROM api_keys k
+       JOIN projects p ON k.project_id = p.id
+       WHERE k.id = $1`,
+      [id]
+    );
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      keyPrefix: r.key_prefix,
+      name: r.name,
+      hashedKey: r.hashed_key,
+      createdAt: new Date(r.created_at),
+      lastUsedAt: r.last_used_at ? new Date(r.last_used_at) : undefined,
+      revokedAt: r.revoked_at ? new Date(r.revoked_at) : undefined,
+      organizationId: r.organization_id
+    };
+  }
+
   async listApiKeys(projectId: string): Promise<ApiKey[]> {
     const res = await this.db.query<any>(
       `SELECT id, project_id, key_prefix, name, created_at, last_used_at, revoked_at
@@ -257,6 +285,10 @@ export class Repository {
     if (filter.projectId) {
       conditions.push(`project_id = $${pIdx++}`);
       params.push(filter.projectId);
+    } else if ((filter as any).projectIds && (filter as any).projectIds.length > 0) {
+      const placeholders = (filter as any).projectIds.map(() => `$${pIdx++}`).join(', ');
+      conditions.push(`project_id IN (${placeholders})`);
+      params.push(...(filter as any).projectIds);
     }
     if (filter.provider) {
       conditions.push(`provider = $${pIdx++}`);
@@ -361,7 +393,7 @@ export class Repository {
 
   // --- Analytics Aggregations ---
 
-  private buildFilterClauses(filter: { projectId?: string; startDate?: Date; endDate?: Date; provider?: string; model?: string }) {
+  private buildFilterClauses(filter: { projectId?: string; projectIds?: string[]; startDate?: Date; endDate?: Date; provider?: string; model?: string }) {
     const conditions: string[] = [];
     const params: any[] = [];
     let pIdx = 1;
@@ -369,6 +401,10 @@ export class Repository {
     if (filter.projectId) {
       conditions.push(`project_id = $${pIdx++}`);
       params.push(filter.projectId);
+    } else if (filter.projectIds && filter.projectIds.length > 0) {
+      const placeholders = filter.projectIds.map(() => `$${pIdx++}`).join(', ');
+      conditions.push(`project_id IN (${placeholders})`);
+      params.push(...filter.projectIds);
     }
     if (filter.provider) {
       conditions.push(`provider = $${pIdx++}`);
@@ -737,14 +773,48 @@ export class Repository {
     };
   }
 
-  async listAlerts(projectId?: string, resolved: boolean = false): Promise<SpendAlert[]> {
-    let sql = `SELECT * FROM alerts WHERE ${resolved ? 'resolved_at IS NOT NULL' : 'resolved_at IS NULL'}`;
+  async getAlertById(id: string): Promise<(SpendAlert & { organizationId: string }) | null> {
+    const res = await this.db.query<any>(
+      `SELECT a.*, p.organization_id
+       FROM alerts a
+       JOIN projects p ON a.project_id = p.id
+       WHERE a.id = $1`,
+      [id]
+    );
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      organizationId: r.organization_id,
+      type: r.type,
+      severity: r.severity,
+      title: r.title,
+      message: r.message,
+      metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
+      triggeredAt: new Date(r.triggered_at),
+      resolvedAt: r.resolved_at ? new Date(r.resolved_at) : undefined
+    };
+  }
+
+  async listAlerts(projectId?: string, resolved: boolean = false, organizationId?: string): Promise<SpendAlert[]> {
+    let sql = `
+      SELECT a.*
+      FROM alerts a
+      JOIN projects p ON a.project_id = p.id
+      WHERE ${resolved ? 'a.resolved_at IS NOT NULL' : 'a.resolved_at IS NULL'}
+    `;
     const params: any[] = [];
+    let pIdx = 1;
+    if (organizationId) {
+      sql += ` AND p.organization_id = $${pIdx++}`;
+      params.push(organizationId);
+    }
     if (projectId) {
-      sql += ` AND project_id = $1`;
+      sql += ` AND a.project_id = $${pIdx++}`;
       params.push(projectId);
     }
-    sql += ` ORDER BY triggered_at DESC LIMIT 50`;
+    sql += ` ORDER BY a.triggered_at DESC LIMIT 50`;
 
     const res = await this.db.query<any>(sql, params);
     return res.rows.map(r => ({

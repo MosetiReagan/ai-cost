@@ -162,29 +162,56 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { user: dbUser };
   });
 
+  // --- Authorization & Access Control Helpers ---
+
+  function requireAuth() {
+    return { preHandler: [(server as any).authenticate] };
+  }
+
+  function requireProjectAccess() {
+    return async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const project = await repo.getProjectById(id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found.' });
+      }
+      const user = (request as any).user;
+      if (project.organizationId !== user.organizationId) {
+        return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+      }
+      (request as any).project = project;
+    };
+  }
+
+  async function resolveOrgProjectIds(user: any, requestedProjectId?: string): Promise<{ authorized: boolean; projectIds?: string[]; singleProjectId?: string }> {
+    if (requestedProjectId) {
+      const project = await repo.getProjectById(requestedProjectId);
+      if (!project || project.organizationId !== user.organizationId) {
+        return { authorized: false };
+      }
+      return { authorized: true, singleProjectId: requestedProjectId };
+    }
+    const projects = await repo.listProjects(user.organizationId);
+    const ids = projects.map(p => p.id);
+    return { authorized: true, projectIds: ids };
+  }
+
   // --- Projects & API Keys ---
 
-  server.get('/api/projects', async (request) => {
-    // In local demo or authenticated mode
+  server.get('/api/projects', requireAuth(), async (request) => {
     const user = (request as any).user;
-    const orgId = user?.organizationId || 'default-org';
-    const org = await repo.getOrganizationBySlug(orgId) || await repo.getOrganizationBySlug('default-org');
-    const projects = await repo.listProjects(org ? org.id : orgId);
+    const projects = await repo.listProjects(user.organizationId);
     return { projects };
   });
 
-  server.post('/api/projects', async (request, reply) => {
+  server.post('/api/projects', requireAuth(), async (request, reply) => {
     const user = (request as any).user;
     const body = request.body as any;
     if (!body?.name) {
       return reply.status(400).send({ error: 'Project name is required.' });
     }
 
-    const orgId = user?.organizationId || (await repo.getOrganizationBySlug('default-org'))?.id;
-    if (!orgId) {
-      return reply.status(400).send({ error: 'Organization not found. Run setup first.' });
-    }
-
+    const orgId = user.organizationId;
     const slug = body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const project = await repo.createProject({
       organizationId: orgId,
@@ -197,27 +224,22 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { project };
   });
 
-  server.delete('/api/projects/:id', async (request) => {
+  server.delete('/api/projects/:id', { preHandler: [(server as any).authenticate, requireProjectAccess()] }, async (request) => {
     const { id } = request.params as { id: string };
     await repo.deleteProject(id);
     return { success: true };
   });
 
-  server.get('/api/projects/:id/keys', async (request) => {
+  server.get('/api/projects/:id/keys', { preHandler: [(server as any).authenticate, requireProjectAccess()] }, async (request) => {
     const { id } = request.params as { id: string };
     const keys = await repo.listApiKeys(id);
     return { keys };
   });
 
-  server.post('/api/projects/:id/keys', async (request, reply) => {
+  server.post('/api/projects/:id/keys', { preHandler: [(server as any).authenticate, requireProjectAccess()] }, async (request) => {
     const { id } = request.params as { id: string };
     const body = request.body as any;
     const name = body?.name?.trim() || 'API Key';
-
-    const project = await repo.getProjectById(id);
-    if (!project) {
-      return reply.status(404).send({ error: 'Project not found.' });
-    }
 
     const keyData = generateApiKey();
     const apiKey = await repo.createApiKey({
@@ -233,18 +255,33 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     };
   });
 
-  server.delete('/api/keys/:id', async (request) => {
+  server.delete('/api/keys/:id', requireAuth(), async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
+    const key = await repo.getApiKeyById(id);
+    if (!key) {
+      return reply.status(404).send({ error: 'API key not found.' });
+    }
+    if (key.organizationId !== user.organizationId) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this API key.' });
+    }
     await repo.revokeApiKey(id);
     return { success: true };
   });
 
   // --- Analytics ---
 
-  server.get('/api/analytics/overview', async (request) => {
+  server.get('/api/analytics/overview', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
     const filter = {
-      projectId: query.projectId,
+      projectId: access.singleProjectId,
+      projectIds: access.projectIds,
       provider: query.provider,
       model: query.model,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
@@ -254,10 +291,17 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { overview };
   });
 
-  server.get('/api/analytics/spend-over-time', async (request) => {
+  server.get('/api/analytics/spend-over-time', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
     const filter = {
-      projectId: query.projectId,
+      projectId: access.singleProjectId,
+      projectIds: access.projectIds,
       interval: query.interval === 'hour' ? 'hour' : 'day',
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined
@@ -266,10 +310,17 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { timeline };
   });
 
-  server.get('/api/analytics/by-provider', async (request) => {
+  server.get('/api/analytics/by-provider', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
     const filter = {
-      projectId: query.projectId,
+      projectId: access.singleProjectId,
+      projectIds: access.projectIds,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined
     };
@@ -277,10 +328,17 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { providers };
   });
 
-  server.get('/api/analytics/by-model', async (request) => {
+  server.get('/api/analytics/by-model', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
     const filter = {
-      projectId: query.projectId,
+      projectId: access.singleProjectId,
+      projectIds: access.projectIds,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined
     };
@@ -288,18 +346,31 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { models };
   });
 
-  server.get('/api/analytics/insights', async (request) => {
+  server.get('/api/analytics/insights', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
-    const insights = await repo.getCostInsights({ projectId: query.projectId });
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
+    const insights = await repo.getCostInsights({ projectId: access.singleProjectId, projectIds: access.projectIds });
     return { insights };
   });
 
   // --- Requests Explorer ---
 
-  server.get('/api/requests', async (request) => {
+  server.get('/api/requests', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
+    const access = await resolveOrgProjectIds(user, query.projectId);
+    if (!access.authorized) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+    }
+
     const filter = {
-      projectId: query.projectId,
+      projectId: access.singleProjectId,
+      projectIds: access.projectIds,
       provider: query.provider,
       model: query.model,
       status: query.status,
@@ -310,31 +381,41 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
       page: query.page ? parseInt(query.page, 10) : 1,
       limit: query.limit ? parseInt(query.limit, 10) : 25
     };
-    const result = await repo.listRequests(filter);
+    const result = await repo.listRequests(filter as any);
     return result;
   });
 
-  server.get('/api/requests/:id', async (request, reply) => {
+  server.get('/api/requests/:id', requireAuth(), async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
     const req = await repo.getRequestById(id);
     if (!req) {
       return reply.status(404).send({ error: 'Request not found.' });
+    }
+    const project = await repo.getProjectById(req.projectId);
+    if (!project || project.organizationId !== user.organizationId) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this request.' });
     }
     return { request: req };
   });
 
   // --- Budgets & Alerts ---
 
-  server.get('/api/budgets', async (request) => {
-    const query = request.query as any;
-    const budgets = await repo.listBudgets(query.organizationId);
+  server.get('/api/budgets', requireAuth(), async (request) => {
+    const user = (request as any).user;
+    const budgets = await repo.listBudgets(user.organizationId);
     return { budgets };
   });
 
-  server.post('/api/budgets', async (request, reply) => {
+  server.post('/api/budgets', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const body = request.body as any;
     if (!body?.projectId || body?.monthlyBudgetUsd === undefined) {
       return reply.status(400).send({ error: 'projectId and monthlyBudgetUsd are required.' });
+    }
+    const project = await repo.getProjectById(body.projectId);
+    if (!project || project.organizationId !== user.organizationId) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
     }
     const budget = await repo.setBudget({
       projectId: body.projectId,
@@ -344,21 +425,36 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { budget };
   });
 
-  server.get('/api/alerts', async (request) => {
+  server.get('/api/alerts', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
     const query = request.query as any;
-    const alerts = await repo.listAlerts(query.projectId, query.resolved === 'true');
+    if (query.projectId) {
+      const project = await repo.getProjectById(query.projectId);
+      if (!project || project.organizationId !== user.organizationId) {
+        return reply.status(403).send({ error: 'Forbidden: You do not have access to this project.' });
+      }
+    }
+    const alerts = await repo.listAlerts(query.projectId, query.resolved === 'true', user.organizationId);
     return { alerts };
   });
 
-  server.post('/api/alerts/:id/resolve', async (request) => {
+  server.post('/api/alerts/:id/resolve', requireAuth(), async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
+    const alert = await repo.getAlertById(id);
+    if (!alert) {
+      return reply.status(404).send({ error: 'Alert not found.' });
+    }
+    if (alert.organizationId !== user.organizationId) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this alert.' });
+    }
     await repo.resolveAlert(id);
     return { success: true };
   });
 
   // --- Pricing Catalog ---
 
-  server.get('/api/pricing', async () => {
+  server.get('/api/pricing', requireAuth(), async () => {
     const custom = await repo.listCustomPricing().catch(() => []);
     return {
       official: MODEL_CATALOG,
@@ -366,7 +462,11 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     };
   });
 
-  server.post('/api/pricing/custom', async (request, reply) => {
+  server.post('/api/pricing/custom', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
+    if (user.role !== 'owner') {
+      return reply.status(403).send({ error: 'Forbidden: Administrator privileges required.' });
+    }
     const body = request.body as any;
     if (!body?.provider || !body?.model || body?.inputCostPerMillion === undefined || body?.outputCostPerMillion === undefined) {
       return reply.status(400).send({ error: 'provider, model, inputCostPerMillion and outputCostPerMillion are required.' });
@@ -384,7 +484,11 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { pricing };
   });
 
-  server.delete('/api/pricing/custom/:provider/:model', async (request) => {
+  server.delete('/api/pricing/custom/:provider/:model', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
+    if (user.role !== 'owner') {
+      return reply.status(403).send({ error: 'Forbidden: Administrator privileges required.' });
+    }
     const { provider, model } = request.params as { provider: string; model: string };
     await repo.deleteCustomPricing(provider, model);
     return { success: true };
@@ -451,9 +555,11 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     return { received: batch.length, status: 'ok' };
   });
 
-  // --- Admin Retention Cleanup ---
-
-  server.post('/api/admin/cleanup', async (request, reply) => {
+  server.post('/api/admin/cleanup', requireAuth(), async (request, reply) => {
+    const user = (request as any).user;
+    if (user.role !== 'owner') {
+      return reply.status(403).send({ error: 'Forbidden: Administrator privileges required.' });
+    }
     const body = request.body as any;
     const days = parseInt(body?.days || process.env.DATA_RETENTION_DAYS || '90', 10);
     const purged = await repo.purgeOldRequests(days);

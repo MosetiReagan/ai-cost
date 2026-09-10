@@ -75,10 +75,11 @@ describe('AI Cost API Server', () => {
     expect(projBody.project.name).toBe('Customer Support Bot');
     createdProjectId = projBody.project.id;
 
-    // Create API Key for this project
+    // Create API Key for this project (requires auth)
     const keyRes = await server.inject({
       method: 'POST',
       url: `/api/projects/${createdProjectId}/keys`,
+      headers: { authorization: `Bearer ${authToken}` },
       payload: { name: 'Prod Bot Key' }
     });
 
@@ -90,11 +91,26 @@ describe('AI Cost API Server', () => {
     // Verify keys listing redacts the raw key
     const listKeysRes = await server.inject({
       method: 'GET',
-      url: `/api/projects/${createdProjectId}/keys`
+      url: `/api/projects/${createdProjectId}/keys`,
+      headers: { authorization: `Bearer ${authToken}` }
     });
     const listBody = JSON.parse(listKeysRes.body);
     expect(listBody.keys.length).toBe(1);
     expect(listBody.keys[0].hashedKey).toBe('***');
+  });
+
+  it('rejects unauthenticated requests to protected endpoints', async () => {
+    const unauthProjects = await server.inject({ method: 'GET', url: '/api/projects' });
+    expect(unauthProjects.statusCode).toBe(401);
+
+    const unauthAnalytics = await server.inject({ method: 'GET', url: '/api/analytics/overview' });
+    expect(unauthAnalytics.statusCode).toBe(401);
+
+    const unauthRequests = await server.inject({ method: 'GET', url: '/api/requests' });
+    expect(unauthRequests.statusCode).toBe(401);
+
+    const unauthCleanup = await server.inject({ method: 'POST', url: '/api/admin/cleanup' });
+    expect(unauthCleanup.statusCode).toBe(401);
   });
 
   it('accepts SDK batch tracking and serves analytics', async () => {
@@ -134,7 +150,8 @@ describe('AI Cost API Server', () => {
     // Verify overview metrics
     const overviewRes = await server.inject({
       method: 'GET',
-      url: `/api/analytics/overview?projectId=${createdProjectId}`
+      url: `/api/analytics/overview?projectId=${createdProjectId}`,
+      headers: { authorization: `Bearer ${authToken}` }
     });
     const overview = JSON.parse(overviewRes.body).overview;
     expect(overview.totalRequests).toBe(2);
@@ -144,7 +161,8 @@ describe('AI Cost API Server', () => {
     // Verify request log
     const reqLogRes = await server.inject({
       method: 'GET',
-      url: `/api/requests?projectId=${createdProjectId}`
+      url: `/api/requests?projectId=${createdProjectId}`,
+      headers: { authorization: `Bearer ${authToken}` }
     });
     const reqLog = JSON.parse(reqLogRes.body);
     expect(reqLog.data.length).toBe(2);
@@ -155,6 +173,7 @@ describe('AI Cost API Server', () => {
     const budgetRes = await server.inject({
       method: 'POST',
       url: '/api/budgets',
+      headers: { authorization: `Bearer ${authToken}` },
       payload: {
         projectId: createdProjectId,
         monthlyBudgetUsd: 150.0,
@@ -168,6 +187,7 @@ describe('AI Cost API Server', () => {
     const pricingRes = await server.inject({
       method: 'POST',
       url: '/api/pricing/custom',
+      headers: { authorization: `Bearer ${authToken}` },
       payload: {
         provider: 'custom-provider',
         model: 'llama-fine-tuned',
@@ -178,7 +198,11 @@ describe('AI Cost API Server', () => {
     });
     expect(pricingRes.statusCode).toBe(200);
 
-    const getPricingRes = await server.inject({ method: 'GET', url: '/api/pricing' });
+    const getPricingRes = await server.inject({
+      method: 'GET',
+      url: '/api/pricing',
+      headers: { authorization: `Bearer ${authToken}` }
+    });
     const pricingList = JSON.parse(getPricingRes.body);
     expect(pricingList.custom.some((c: any) => c.model === 'llama-fine-tuned')).toBe(true);
   });
