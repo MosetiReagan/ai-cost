@@ -1,19 +1,9 @@
 import { AICost } from './client.js';
 
-/**
- * Wraps an OpenAI client instance to automatically record latency and token counts.
- */
-export function wrapOpenAI<T extends { chat?: { completions?: { create?: (...args: any[]) => any } } }>(
-  client: T,
-  aiCost: AICost
-): T {
-  if (!client?.chat?.completions?.create) {
-    return client;
-  }
+export const WRAPPED_MARKER = Symbol('__AI_COST_WRAPPED__');
 
-  const originalCreate = client.chat.completions.create.bind(client.chat.completions);
-
-  client.chat.completions.create = async function (params: any, options: any) {
+function createWrappedOpenAICreate(originalCreate: (...args: any[]) => any, aiCost: AICost) {
+  return async function (params: any, options: any) {
     const start = Date.now();
     try {
       const response = await originalCreate(params, options);
@@ -23,7 +13,7 @@ export function wrapOpenAI<T extends { chat?: { completions?: { create?: (...arg
       if (response && response.usage) {
         aiCost.track({
           provider: 'openai',
-          model: response.model || params.model,
+          model: response.model || params?.model || 'unknown',
           inputTokens: response.usage.prompt_tokens || 0,
           outputTokens: response.usage.completion_tokens || 0,
           cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
@@ -38,7 +28,7 @@ export function wrapOpenAI<T extends { chat?: { completions?: { create?: (...arg
       const latencyMs = Date.now() - start;
       aiCost.track({
         provider: 'openai',
-        model: params.model,
+        model: params?.model || 'unknown',
         inputTokens: 0,
         outputTokens: 0,
         latencyMs,
@@ -49,24 +39,61 @@ export function wrapOpenAI<T extends { chat?: { completions?: { create?: (...arg
       throw err;
     }
   };
+}
 
-  return client;
+function wrapOpenAIChat(chat: any, aiCost: AICost): any {
+  return new Proxy(chat, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'completions' && value && typeof value === 'object') {
+        return wrapOpenAICompletions(value, aiCost);
+      }
+      return value;
+    }
+  });
+}
+
+function wrapOpenAICompletions(completions: any, aiCost: AICost): any {
+  return new Proxy(completions, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'create' && typeof value === 'function') {
+        return createWrappedOpenAICreate(value.bind(target), aiCost);
+      }
+      return value;
+    }
+  });
 }
 
 /**
- * Wraps an Anthropic client instance to automatically record latency and token counts.
+ * Wraps an OpenAI client instance via Proxy to automatically record latency and token counts without mutating original client.
  */
-export function wrapAnthropic<T extends { messages?: { create?: (...args: any[]) => any } }>(
+export function wrapOpenAI<T extends object>(
   client: T,
   aiCost: AICost
 ): T {
-  if (!client?.messages?.create) {
+  if (!client || (client as any)[WRAPPED_MARKER]) {
     return client;
   }
 
-  const originalCreate = client.messages.create.bind(client.messages);
+  const handler: ProxyHandler<any> = {
+    get(target, prop, receiver) {
+      if (prop === WRAPPED_MARKER) {
+        return true;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'chat' && value && typeof value === 'object') {
+        return wrapOpenAIChat(value, aiCost);
+      }
+      return value;
+    }
+  };
 
-  client.messages.create = async function (params: any, options: any) {
+  return new Proxy(client, handler);
+}
+
+function createWrappedAnthropicCreate(originalCreate: (...args: any[]) => any, aiCost: AICost) {
+  return async function (params: any, options: any) {
     const start = Date.now();
     try {
       const response = await originalCreate(params, options);
@@ -75,7 +102,7 @@ export function wrapAnthropic<T extends { messages?: { create?: (...args: any[])
       if (response && response.usage) {
         aiCost.track({
           provider: 'anthropic',
-          model: response.model || params.model,
+          model: response.model || params?.model || 'unknown',
           inputTokens: response.usage.input_tokens || 0,
           outputTokens: response.usage.output_tokens || 0,
           cachedTokens: response.usage.cache_read_input_tokens || 0,
@@ -90,7 +117,7 @@ export function wrapAnthropic<T extends { messages?: { create?: (...args: any[])
       const latencyMs = Date.now() - start;
       aiCost.track({
         provider: 'anthropic',
-        model: params.model,
+        model: params?.model || 'unknown',
         inputTokens: 0,
         outputTokens: 0,
         latencyMs,
@@ -101,6 +128,44 @@ export function wrapAnthropic<T extends { messages?: { create?: (...args: any[])
       throw err;
     }
   };
-
-  return client;
 }
+
+function wrapAnthropicMessages(messages: any, aiCost: AICost): any {
+  return new Proxy(messages, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'create' && typeof value === 'function') {
+        return createWrappedAnthropicCreate(value.bind(target), aiCost);
+      }
+      return value;
+    }
+  });
+}
+
+/**
+ * Wraps an Anthropic client instance via Proxy to automatically record latency and token counts without mutating original client.
+ */
+export function wrapAnthropic<T extends object>(
+  client: T,
+  aiCost: AICost
+): T {
+  if (!client || (client as any)[WRAPPED_MARKER]) {
+    return client;
+  }
+
+  const handler: ProxyHandler<any> = {
+    get(target, prop, receiver) {
+      if (prop === WRAPPED_MARKER) {
+        return true;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === 'messages' && value && typeof value === 'object') {
+        return wrapAnthropicMessages(value, aiCost);
+      }
+      return value;
+    }
+  };
+
+  return new Proxy(client, handler);
+}
+

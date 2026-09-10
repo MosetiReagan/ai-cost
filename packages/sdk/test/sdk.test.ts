@@ -80,6 +80,11 @@ describe('AICost SDK', () => {
         status: 'success'
       })
     );
+
+    // Verify non-destructive wrapping and double-wrap protection
+    expect(mockOpenAIClient.chat.completions.create).not.toBe(wrapped.chat.completions.create);
+    const doubleWrapped = wrapOpenAI(wrapped, mockAICost);
+    expect(doubleWrapped).toBe(wrapped);
   });
 
   it('wrapAnthropic intercepts calls and reports metrics', async () => {
