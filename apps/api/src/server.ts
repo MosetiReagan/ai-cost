@@ -523,20 +523,28 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
       return { received: 0 };
     }
 
-    // Authenticate project from header if present
+    // Authenticate project strictly from API key
     const authHeader = request.headers['authorization'];
-    let projectId = 'default-project';
+    const customHeader = request.headers['x-ai-cost-key'] as string | undefined;
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7).trim();
-      if (token.startsWith('ac_live_') || token.startsWith('ac_test_')) {
-        const hashed = hashApiKey(token);
-        const keyRecord = await repo.getApiKeyByHashedKey(hashed);
-        if (keyRecord) {
-          projectId = keyRecord.projectId;
-        }
-      }
+    let rawKey = customHeader;
+    if (!rawKey && authHeader && authHeader.startsWith('Bearer ')) {
+      rawKey = authHeader.slice(7).trim();
     }
+
+    if (!rawKey) {
+      return reply.status(401).send({ error: 'Unauthorized: Missing AI Cost API key.' });
+    }
+
+    const hashed = hashApiKey(rawKey);
+    const keyRecord = await repo.getApiKeyByHashedKey(hashed);
+
+    if (!keyRecord) {
+      return reply.status(401).send({ error: 'Unauthorized: Invalid or revoked AI Cost API key.' });
+    }
+
+    const projectId = keyRecord.projectId; // Strictly resolved from authenticated API key
+    repo.updateApiKeyLastUsed(keyRecord.id).catch(() => {});
 
     const customPricing = await repo.listCustomPricing().catch(() => []);
 
@@ -552,7 +560,7 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
 
       await repo.recordRequest({
         requestId: item.requestId,
-        projectId: item.projectId || projectId,
+        projectId, // Enforce verified project ID, ignoring any caller-supplied projectId
         provider: item.provider,
         model: item.model,
         inputTokens: item.inputTokens,

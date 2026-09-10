@@ -9,6 +9,7 @@ describe('AI Cost API Server', () => {
   let server: FastifyInstance;
   let authToken: string;
   let createdProjectId: string;
+  let createdApiKey: string;
 
   beforeAll(async () => {
     db = await createDatabaseClient();
@@ -87,6 +88,7 @@ describe('AI Cost API Server', () => {
     const keyBody = JSON.parse(keyRes.body);
     expect(keyBody.rawKey).toMatch(/^ac_live_/);
     expect(keyBody.apiKey.keyPrefix).toBeDefined();
+    createdApiKey = keyBody.rawKey;
 
     // Verify keys listing redacts the raw key
     const listKeysRes = await server.inject({
@@ -117,11 +119,12 @@ describe('AI Cost API Server', () => {
     const trackRes = await server.inject({
       method: 'POST',
       url: '/api/usage/track',
+      headers: { authorization: `Bearer ${createdApiKey}` },
       payload: {
         batch: [
           {
             requestId: 'sdk-req-1',
-            projectId: createdProjectId,
+            projectId: 'spoofed-victim-id', // Caller-supplied projectId should be safely ignored
             provider: 'openai',
             model: 'gpt-4o',
             inputTokens: 1500,
@@ -131,7 +134,7 @@ describe('AI Cost API Server', () => {
           },
           {
             requestId: 'sdk-req-2',
-            projectId: createdProjectId,
+            projectId: 'spoofed-victim-id',
             provider: 'anthropic',
             model: 'claude-3-5-sonnet-latest',
             inputTokens: 3000,
