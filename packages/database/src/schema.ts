@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS requests (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   cached_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
-  estimated_cost DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+  estimated_cost NUMERIC(12, 8) NOT NULL DEFAULT 0.0,
   latency_ms INTEGER NOT NULL DEFAULT 0,
   status_code INTEGER NOT NULL DEFAULT 200,
   status TEXT NOT NULL DEFAULT 'success',
@@ -63,9 +63,9 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE TABLE IF NOT EXISTS budgets (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
-  monthly_budget_usd DOUBLE PRECISION NOT NULL,
+  monthly_budget_usd NUMERIC(10, 2) NOT NULL,
   alert_threshold_percent INTEGER NOT NULL DEFAULT 80,
-  current_spend_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+  current_spend_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.0,
   status TEXT NOT NULL DEFAULT 'ok',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -87,9 +87,9 @@ CREATE TABLE IF NOT EXISTS custom_pricing (
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   display_name TEXT NOT NULL,
-  input_cost_per_million DOUBLE PRECISION NOT NULL,
-  output_cost_per_million DOUBLE PRECISION NOT NULL,
-  cached_input_cost_per_million DOUBLE PRECISION,
+  input_cost_per_million NUMERIC(10, 4) NOT NULL,
+  output_cost_per_million NUMERIC(10, 4) NOT NULL,
+  cached_input_cost_per_million NUMERIC(10, 4),
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(provider, model)
 );
