@@ -346,5 +346,25 @@ describe('AI Cost Gateway', () => {
     const body = JSON.parse(res.body);
     expect(body.error.type).toBe('gateway_timeout');
   });
+
+  it('rejects unknown explicit provider with HTTP 400', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      headers: {
+        authorization: `Bearer ${validRawKey}`,
+        'x-provider': 'invalid-provider'
+      },
+      payload: {
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Test' }]
+      }
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('Unknown provider');
+  });
 });
 

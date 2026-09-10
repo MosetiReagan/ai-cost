@@ -6,7 +6,7 @@ import { Repository } from '@ai-cost/database';
 import { AIRequestUsage } from '@ai-cost/types';
 import { createAuthMiddleware } from './auth.js';
 import { UsageQueue } from './queue.js';
-import { resolveProvider, forwardToProvider } from './providers/router.js';
+import { resolveProvider, forwardToProvider, SupportedProvider } from './providers/router.js';
 
 export interface ServerOptions {
   repo: Repository;
@@ -92,7 +92,17 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     const requestId = (request.headers['x-request-id'] as string) || `req_${randomUUID()}`;
     const model = body.model;
     const explicitProvider = request.headers['x-provider'] as string | undefined;
-    const provider = resolveProvider(model, explicitProvider);
+    let provider: SupportedProvider;
+    try {
+      provider = resolveProvider(model, explicitProvider);
+    } catch (err: any) {
+      return reply.status(400).send({
+        error: {
+          message: err.message,
+          type: 'invalid_request_error'
+        }
+      });
+    }
     const environment = (request.headers['x-environment'] as string) || 'production';
 
     const startTime = Date.now();
