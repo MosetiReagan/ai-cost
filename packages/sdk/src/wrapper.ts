@@ -2,11 +2,84 @@ import { AICost } from './client.js';
 
 export const WRAPPED_MARKER = Symbol('__AI_COST_WRAPPED__');
 
+async function* wrapOpenAIStream(
+  stream: AsyncIterable<any>,
+  params: any,
+  start: number,
+  aiCost: AICost
+) {
+  let model = params?.model || 'unknown';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+  let hasUsage = false;
+  let outputText = '';
+  let errorOccurred = false;
+
+  try {
+    for await (const chunk of stream) {
+      if (chunk.model) {
+        model = chunk.model;
+      }
+      if (chunk.usage) {
+        hasUsage = true;
+        inputTokens = chunk.usage.prompt_tokens || inputTokens;
+        outputTokens = chunk.usage.completion_tokens || outputTokens;
+        cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens || cachedTokens;
+      }
+      if (!hasUsage) {
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string') {
+          outputText += delta;
+        }
+      }
+      yield chunk;
+    }
+  } catch (err: any) {
+    errorOccurred = true;
+    const latencyMs = Date.now() - start;
+    aiCost.track({
+      provider: 'openai',
+      model,
+      inputTokens: 0,
+      outputTokens: 0,
+      latencyMs,
+      statusCode: err.status || 500,
+      status: 'error',
+      errorMessage: err.message
+    }).catch(() => {});
+    throw err;
+  }
+
+  if (!errorOccurred) {
+    const latencyMs = Date.now() - start;
+    if (!hasUsage && outputText.length > 0) {
+      outputTokens = Math.ceil(outputText.length / 4);
+    }
+    aiCost.track({
+      provider: 'openai',
+      model,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      latencyMs,
+      statusCode: 200,
+      status: 'success'
+    }).catch(() => {});
+  }
+}
+
 function createWrappedOpenAICreate(originalCreate: (...args: any[]) => any, aiCost: AICost) {
   return async function (params: any, options: any) {
     const start = Date.now();
     try {
       const response = await originalCreate(params, options);
+
+      // Handle streaming async iterables
+      if (response != null && typeof (response as any)[Symbol.asyncIterator] === 'function') {
+        return wrapOpenAIStream(response, params, start, aiCost);
+      }
+
       const latencyMs = Date.now() - start;
 
       // Extract usage from standard OpenAI chat completion response
@@ -92,11 +165,73 @@ export function wrapOpenAI<T extends object>(
   return new Proxy(client, handler);
 }
 
+async function* wrapAnthropicStream(
+  stream: AsyncIterable<any>,
+  params: any,
+  start: number,
+  aiCost: AICost
+) {
+  let model = params?.model || 'unknown';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+  let errorOccurred = false;
+
+  try {
+    for await (const chunk of stream) {
+      if (chunk.type === 'message_start' && chunk.message) {
+        if (chunk.message.model) model = chunk.message.model;
+        if (chunk.message.usage) {
+          inputTokens = chunk.message.usage.input_tokens || inputTokens;
+          cachedTokens = chunk.message.usage.cache_read_input_tokens || cachedTokens;
+        }
+      } else if (chunk.type === 'message_delta' && chunk.usage) {
+        outputTokens = chunk.usage.output_tokens || outputTokens;
+      }
+      yield chunk;
+    }
+  } catch (err: any) {
+    errorOccurred = true;
+    const latencyMs = Date.now() - start;
+    aiCost.track({
+      provider: 'anthropic',
+      model,
+      inputTokens: 0,
+      outputTokens: 0,
+      latencyMs,
+      statusCode: err.status || 500,
+      status: 'error',
+      errorMessage: err.message
+    }).catch(() => {});
+    throw err;
+  }
+
+  if (!errorOccurred) {
+    const latencyMs = Date.now() - start;
+    aiCost.track({
+      provider: 'anthropic',
+      model,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      latencyMs,
+      statusCode: 200,
+      status: 'success'
+    }).catch(() => {});
+  }
+}
+
 function createWrappedAnthropicCreate(originalCreate: (...args: any[]) => any, aiCost: AICost) {
   return async function (params: any, options: any) {
     const start = Date.now();
     try {
       const response = await originalCreate(params, options);
+
+      // Handle streaming async iterables
+      if (response != null && typeof (response as any)[Symbol.asyncIterator] === 'function') {
+        return wrapAnthropicStream(response, params, start, aiCost);
+      }
+
       const latencyMs = Date.now() - start;
 
       if (response && response.usage) {

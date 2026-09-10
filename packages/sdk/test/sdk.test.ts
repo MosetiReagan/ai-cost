@@ -172,5 +172,113 @@ describe('AICost SDK', () => {
     expect(deliveredPayload.batch.length).toBe(1);
     expect(deliveredPayload.batch[0].model).toBe('gpt-4o');
   });
+
+  it('wrapOpenAI captures streaming usage and yields all chunks', async () => {
+    const mockAICost = {
+      track: vi.fn().mockResolvedValue(undefined)
+    } as any;
+
+    async function* makeStream() {
+      yield { id: 'chunk-1', model: 'gpt-4o-mini', choices: [{ delta: { content: 'Hello ' } }] };
+      yield {
+        id: 'chunk-2',
+        model: 'gpt-4o-mini',
+        choices: [{ delta: { content: 'world!' } }],
+        usage: { prompt_tokens: 35, completion_tokens: 12 }
+      };
+    }
+
+    const mockOpenAI = {
+      chat: {
+        completions: {
+          create: vi.fn().mockResolvedValue(makeStream())
+        }
+      }
+    };
+
+    const wrapped = wrapOpenAI(mockOpenAI, mockAICost);
+    const stream = await wrapped.chat.completions.create({
+      model: 'gpt-4o-mini',
+      stream: true,
+      messages: [{ role: 'user', content: 'Say hello' }]
+    });
+
+    const receivedChunks: any[] = [];
+    for await (const chunk of stream) {
+      receivedChunks.push(chunk);
+    }
+
+    expect(receivedChunks.length).toBe(2);
+    expect(receivedChunks[0].choices[0].delta.content).toBe('Hello ');
+    expect(receivedChunks[1].choices[0].delta.content).toBe('world!');
+
+    expect(mockAICost.track).toHaveBeenCalledTimes(1);
+    expect(mockAICost.track).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        inputTokens: 35,
+        outputTokens: 12,
+        status: 'success'
+      })
+    );
+  });
+
+  it('wrapAnthropic captures streaming usage from message chunks', async () => {
+    const mockAICost = {
+      track: vi.fn().mockResolvedValue(undefined)
+    } as any;
+
+    async function* makeAnthropicStream() {
+      yield {
+        type: 'message_start',
+        message: {
+          id: 'msg-stream-1',
+          model: 'claude-3-5-sonnet-20241022',
+          usage: { input_tokens: 80, cache_read_input_tokens: 20 }
+        }
+      };
+      yield {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'Anthropic stream' }
+      };
+      yield {
+        type: 'message_delta',
+        usage: { output_tokens: 45 }
+      };
+    }
+
+    const mockAnthropic = {
+      messages: {
+        create: vi.fn().mockResolvedValue(makeAnthropicStream())
+      }
+    };
+
+    const { wrapAnthropic } = await import('../src/index.js');
+    const wrapped = wrapAnthropic(mockAnthropic, mockAICost);
+    const stream = await wrapped.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      stream: true,
+      messages: [{ role: 'user', content: 'Stream test' }]
+    });
+
+    const chunks: any[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.length).toBe(3);
+    expect(mockAICost.track).toHaveBeenCalledTimes(1);
+    expect(mockAICost.track).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet-20241022',
+        inputTokens: 80,
+        outputTokens: 45,
+        cachedTokens: 20,
+        status: 'success'
+      })
+    );
+  });
 });
 
