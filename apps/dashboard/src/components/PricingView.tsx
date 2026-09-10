@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ModelPricing } from '../types';
-import { api } from '../api';
-import { DollarSign, Plus, Trash2, Shield, Info } from 'lucide-react';
+import { Plus, Shield } from 'lucide-react';
 
 export const PricingView: React.FC = () => {
   const [officialPricing, setOfficialPricing] = useState<ModelPricing[]>([]);

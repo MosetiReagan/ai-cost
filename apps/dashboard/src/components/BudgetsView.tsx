@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Budget, SpendAlert, Project } from '../types';
 import { api } from '../api';
-import { PieChart, AlertCircle, CheckCircle, Bell, Plus, ShieldCheck } from 'lucide-react';
+import { CheckCircle, Bell, Plus } from 'lucide-react';
 
 interface BudgetsViewProps {
   projects: Project[];

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ModelBreakdown, ProviderBreakdown } from '../types';
+import { ModelBreakdown } from '../types';
 import { api } from '../api';
-import { Cpu, Zap, DollarSign, Clock, AlertTriangle } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 
 interface ModelsViewProps {
   selectedProjectId: string;
@@ -9,19 +9,14 @@ interface ModelsViewProps {
 
 export const ModelsView: React.FC<ModelsViewProps> = ({ selectedProjectId }) => {
   const [models, setModels] = useState<ModelBreakdown[]>([]);
-  const [providers, setProviders] = useState<ProviderBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [modelRes, provRes] = await Promise.all([
-          api.getSpendByModel(selectedProjectId ? { projectId: selectedProjectId } : {}),
-          api.getSpendByProvider(selectedProjectId ? { projectId: selectedProjectId } : {})
-        ]);
+        const modelRes = await api.getSpendByModel(selectedProjectId ? { projectId: selectedProjectId } : {});
         setModels(modelRes.models);
-        setProviders(provRes.providers);
       } catch (err) {
         console.error('Failed to load model data:', err);
       } finally {

@@ -3,7 +3,7 @@ import { AICost } from './client.js';
 /**
  * Wraps an OpenAI client instance to automatically record latency and token counts.
  */
-export function wrapOpenAI<T extends { chat?: { completions?: { create?: Function } } }>(
+export function wrapOpenAI<T extends { chat?: { completions?: { create?: (...args: any[]) => any } } }>(
   client: T,
   aiCost: AICost
 ): T {
@@ -56,7 +56,7 @@ export function wrapOpenAI<T extends { chat?: { completions?: { create?: Functio
 /**
  * Wraps an Anthropic client instance to automatically record latency and token counts.
  */
-export function wrapAnthropic<T extends { messages?: { create?: Function } }>(
+export function wrapAnthropic<T extends { messages?: { create?: (...args: any[]) => any } }>(
   client: T,
   aiCost: AICost
 ): T {

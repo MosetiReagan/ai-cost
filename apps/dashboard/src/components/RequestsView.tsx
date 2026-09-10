@@ -3,7 +3,6 @@ import { AIRequestItem } from '../types';
 import { api } from '../api';
 import {
   Search,
-  Filter,
   ChevronLeft,
   ChevronRight,
   X,

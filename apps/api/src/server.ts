@@ -53,7 +53,7 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
   server.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
-    } catch (err) {
+    } catch {
       reply.status(401).send({ error: 'Unauthorized. Please sign in.' });
     }
   });

@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Project, ApiKey } from '../types';
 import { api } from '../api';
-import { FolderGit2, Key, Plus, Trash2, Copy, Check, ShieldAlert } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, ShieldAlert } from 'lucide-react';
 
 export const ProjectsView: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // New Project modal
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
@@ -21,7 +20,6 @@ export const ProjectsView: React.FC = () => {
   const [copied, setCopied] = useState(false);
 
   const fetchProjects = async () => {
-    setLoading(true);
     try {
       const res = await api.getProjects();
       setProjects(res.projects);
@@ -30,8 +28,6 @@ export const ProjectsView: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load projects:', err);
-    } finally {
-      setLoading(false);
     }
   };
 

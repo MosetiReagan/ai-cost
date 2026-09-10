@@ -15,9 +15,7 @@ import {
   Clock,
   AlertTriangle,
   Lightbulb,
-  ArrowUpRight,
-  CheckCircle2,
-  ExternalLink
+  ArrowUpRight
 } from 'lucide-react';
 import {
   AreaChart,
@@ -26,9 +24,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar
+  ResponsiveContainer
 } from 'recharts';
 
 interface OverviewViewProps {

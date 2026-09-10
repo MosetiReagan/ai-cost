@@ -10,7 +10,7 @@ describe('AI Cost Gateway', () => {
   let repo: Repository;
   let queue: UsageQueue;
   let server: FastifyInstance;
-  let validRawKey = 'ac_live_test_gateway_key_999';
+  const validRawKey = 'ac_live_test_gateway_key_999';
   let projectId: string;
 
   beforeAll(async () => {
@@ -85,7 +85,7 @@ describe('AI Cost Gateway', () => {
 
   it('forwards chat completion request and returns AI Cost observability headers', async () => {
     // Mock global fetch for upstream provider
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string) => {
       return {
         ok: true,
         status: 200,
@@ -150,7 +150,7 @@ describe('AI Cost Gateway', () => {
   });
 
   it('translates Anthropic requests transparently', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string) => {
       // Return Anthropic message response
       return {
         ok: true,
@@ -193,7 +193,7 @@ describe('AI Cost Gateway', () => {
   });
 
   it('translates Google Gemini requests transparently', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string) => {
       return {
         ok: true,
         status: 200,
@@ -236,7 +236,7 @@ describe('AI Cost Gateway', () => {
   });
 
   it('proxies Ollama requests and records $0.00 base cost', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string) => {
       return {
         ok: true,
         status: 200,

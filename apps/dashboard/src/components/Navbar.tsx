@@ -1,6 +1,6 @@
 import React from 'react';
 import { Project } from '../types';
-import { ShieldCheck, Calendar, Layers, Activity } from 'lucide-react';
+import { Calendar, Layers, Activity } from 'lucide-react';
 
 interface NavbarProps {
   projects: Project[];

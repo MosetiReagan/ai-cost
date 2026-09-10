@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { api, setAuthToken } from '../api';
-import { ShieldCheck, Sparkles } from 'lucide-react';
 
 interface SetupModalProps {
   onCompleted: () => void;
