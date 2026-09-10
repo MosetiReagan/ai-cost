@@ -207,4 +207,14 @@ describe('Database & Aggregation Engine', () => {
     expect(batchReq1?.totalTokens).toBe(150);
     expect(batchReq2?.totalTokens).toBe(300);
   });
+
+  it('rejects startup in production without valid PostgreSQL URL', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      await expect(createDatabaseClient()).rejects.toThrow('DATABASE_URL is required in production environments');
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
 });

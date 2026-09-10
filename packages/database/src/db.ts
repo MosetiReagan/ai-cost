@@ -58,6 +58,7 @@ let singletonClient: IDatabaseClient | null = null;
 
 export async function createDatabaseClient(connectionUrl?: string): Promise<IDatabaseClient> {
   const url = connectionUrl || process.env.DATABASE_URL;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   if (url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))) {
     try {
@@ -70,11 +71,21 @@ export async function createDatabaseClient(connectionUrl?: string): Promise<IDat
       await client.query(SCHEMA_SQL);
       return client;
     } catch (err) {
+      if (isProduction) {
+        const maskedUrl = url.replace(/:[^:@]+@/, ':***@');
+        throw new Error(
+          `Failed to connect to PostgreSQL at ${maskedUrl}. In production, PGlite fallback is disabled. Original error: ${(err as Error).message}`
+        );
+      }
       console.warn(`[ai-cost/database] Failed to connect to PostgreSQL at ${url}. Falling back to embedded PGlite engine. Error:`, (err as Error).message);
     }
+  } else if (isProduction) {
+    throw new Error(
+      'DATABASE_URL is required in production environments. Set it to a valid postgresql:// connection string.'
+    );
   }
 
-  // Fallback to embedded PGlite (in-memory or data dir)
+  // Fallback to embedded PGlite for local development and testing
   const pglite = new PGlite(process.env.PGLITE_DATA_DIR || undefined);
   const client = new PGliteDatabaseClient(pglite);
   await client.query(SCHEMA_SQL);
