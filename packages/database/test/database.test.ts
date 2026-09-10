@@ -217,4 +217,19 @@ describe('Database & Aggregation Engine', () => {
       process.env.NODE_ENV = originalEnv;
     }
   });
+
+  it('tracks pricing change history for auditability', async () => {
+    await repo.setCustomPricing({
+      provider: 'openai',
+      model: 'custom-ft-model',
+      displayName: 'Fine-tuned Model',
+      inputCostPerMillion: 3.50,
+      outputCostPerMillion: 12.00
+    });
+
+    const history = await repo.getPricingHistory('openai', 'custom-ft-model');
+    expect(history.length).toBeGreaterThan(0);
+    expect(Number(history[0].input_cost_per_million)).toBe(3.5);
+    expect(history[0].source).toBe('custom');
+  });
 });

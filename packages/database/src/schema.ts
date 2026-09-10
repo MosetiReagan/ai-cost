@@ -90,8 +90,21 @@ CREATE TABLE IF NOT EXISTS custom_pricing (
   input_cost_per_million NUMERIC(10, 4) NOT NULL,
   output_cost_per_million NUMERIC(10, 4) NOT NULL,
   cached_input_cost_per_million NUMERIC(10, 4),
+  effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(provider, model)
+);
+
+CREATE TABLE IF NOT EXISTS pricing_history (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_cost_per_million NUMERIC(10, 4) NOT NULL,
+  output_cost_per_million NUMERIC(10, 4) NOT NULL,
+  cached_input_cost_per_million NUMERIC(10, 4),
+  effective_from TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  effective_to TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'custom'
 );
 
 CREATE INDEX IF NOT EXISTS idx_requests_project_timestamp ON requests (project_id, timestamp DESC);

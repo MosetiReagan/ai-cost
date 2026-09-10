@@ -915,6 +915,20 @@ export class Repository {
         pricing.cachedInputCostPerMillion || null
       ]
     );
+
+    // Record pricing change in pricing_history for historical audit trails
+    await this.db.query(
+      `INSERT INTO pricing_history (id, provider, model, input_cost_per_million, output_cost_per_million, cached_input_cost_per_million, source)
+       VALUES ($1, $2, $3, $4, $5, $6, 'custom')`,
+      [
+        randomUUID(),
+        pricing.provider.toLowerCase(),
+        pricing.model.toLowerCase(),
+        pricing.inputCostPerMillion,
+        pricing.outputCostPerMillion,
+        pricing.cachedInputCostPerMillion || null
+      ]
+    );
   }
 
   async listCustomPricing(): Promise<ModelPricing[]> {
@@ -928,6 +942,18 @@ export class Repository {
       cachedInputCostPerMillion: r.cached_input_cost_per_million ? Number(r.cached_input_cost_per_million) : undefined,
       isCustom: true
     }));
+  }
+
+  async getPricingHistory(provider?: string, model?: string): Promise<any[]> {
+    let sql = `SELECT * FROM pricing_history`;
+    const params: any[] = [];
+    if (provider && model) {
+      sql += ` WHERE provider = $1 AND model = $2`;
+      params.push(provider.toLowerCase(), model.toLowerCase());
+    }
+    sql += ` ORDER BY effective_from DESC`;
+    const res = await this.db.query(sql, params);
+    return res.rows;
   }
 
   async deleteCustomPricing(provider: string, model: string): Promise<boolean> {
