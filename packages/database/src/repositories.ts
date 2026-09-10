@@ -985,4 +985,71 @@ export class Repository {
 
     return totalDeleted;
   }
+
+  // --- Daily Rollups & Aggregations ---
+
+  async refreshDailyRollups(targetDate?: Date): Promise<void> {
+    const dateFilter = targetDate ? `AND DATE(timestamp) = DATE($1)` : `AND timestamp >= CURRENT_DATE - INTERVAL '7 days'`;
+    const params = targetDate ? [targetDate] : [];
+
+    await this.db.query(
+      `INSERT INTO request_rollups_daily (
+        date, project_id, provider, model,
+        total_requests, successful_requests, failed_requests,
+        total_cost, total_tokens, input_tokens, output_tokens, cached_tokens, avg_latency_ms
+      )
+      SELECT
+        DATE(timestamp) as date,
+        project_id,
+        provider,
+        model,
+        COUNT(*)::int as total_requests,
+        COUNT(*) FILTER (WHERE status = 'success')::int as successful_requests,
+        COUNT(*) FILTER (WHERE status != 'success')::int as failed_requests,
+        COALESCE(SUM(estimated_cost), 0)::numeric(12, 8) as total_cost,
+        COALESCE(SUM(total_tokens), 0)::bigint as total_tokens,
+        COALESCE(SUM(input_tokens), 0)::bigint as input_tokens,
+        COALESCE(SUM(output_tokens), 0)::bigint as output_tokens,
+        COALESCE(SUM(cached_tokens), 0)::bigint as cached_tokens,
+        COALESCE(AVG(latency_ms), 0)::int as avg_latency_ms
+      FROM requests
+      WHERE 1=1 ${dateFilter}
+      GROUP BY DATE(timestamp), project_id, provider, model
+      ON CONFLICT (date, project_id, provider, model) DO UPDATE SET
+        total_requests = EXCLUDED.total_requests,
+        successful_requests = EXCLUDED.successful_requests,
+        failed_requests = EXCLUDED.failed_requests,
+        total_cost = EXCLUDED.total_cost,
+        total_tokens = EXCLUDED.total_tokens,
+        input_tokens = EXCLUDED.input_tokens,
+        output_tokens = EXCLUDED.output_tokens,
+        cached_tokens = EXCLUDED.cached_tokens,
+        avg_latency_ms = EXCLUDED.avg_latency_ms`,
+      params
+    );
+  }
+
+  async getDailyRollups(projectId: string, days: number = 30): Promise<any[]> {
+    const res = await this.db.query(
+      `SELECT * FROM request_rollups_daily
+       WHERE project_id = $1 AND date >= CURRENT_DATE - ($2 || ' days')::interval
+       ORDER BY date DESC, total_cost DESC`,
+      [projectId, days]
+    );
+    return res.rows.map(r => ({
+      date: r.date,
+      projectId: r.project_id,
+      provider: r.provider,
+      model: r.model,
+      totalRequests: Number(r.total_requests),
+      successfulRequests: Number(r.successful_requests),
+      failedRequests: Number(r.failed_requests),
+      totalCost: Number(r.total_cost),
+      totalTokens: Number(r.total_tokens),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+      cachedTokens: Number(r.cached_tokens),
+      avgLatencyMs: Number(r.avg_latency_ms)
+    }));
+  }
 }

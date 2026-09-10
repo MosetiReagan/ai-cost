@@ -107,6 +107,24 @@ CREATE TABLE IF NOT EXISTS pricing_history (
   source TEXT NOT NULL DEFAULT 'custom'
 );
 
+CREATE TABLE IF NOT EXISTS request_rollups_daily (
+  date DATE NOT NULL,
+  project_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  total_requests INTEGER NOT NULL DEFAULT 0,
+  successful_requests INTEGER NOT NULL DEFAULT 0,
+  failed_requests INTEGER NOT NULL DEFAULT 0,
+  total_cost NUMERIC(12, 8) NOT NULL DEFAULT 0.0,
+  total_tokens BIGINT NOT NULL DEFAULT 0,
+  input_tokens BIGINT NOT NULL DEFAULT 0,
+  output_tokens BIGINT NOT NULL DEFAULT 0,
+  cached_tokens BIGINT NOT NULL DEFAULT 0,
+  avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, project_id, provider, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rollups_project_date ON request_rollups_daily (project_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_requests_project_timestamp ON requests (project_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_requests_provider_timestamp ON requests (provider, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_requests_model_timestamp ON requests (model, timestamp DESC);

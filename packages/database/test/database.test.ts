@@ -256,4 +256,15 @@ describe('Database & Aggregation Engine', () => {
     const purged = await repo.purgeOldRequests(365, 5);
     expect(purged).toBeGreaterThanOrEqual(1);
   });
+
+  it('aggregates daily request rollups for scalable analytics', async () => {
+    const projects = await repo.listProjects((await repo.getOrganizationBySlug('acme-ai')).id);
+    const projectId = projects[0].id;
+
+    await repo.refreshDailyRollups();
+    const rollups = await repo.getDailyRollups(projectId, 30);
+    expect(rollups.length).toBeGreaterThan(0);
+    expect(rollups[0].totalRequests).toBeGreaterThan(0);
+    expect(rollups[0].totalCost).toBeGreaterThan(0);
+  });
 });
