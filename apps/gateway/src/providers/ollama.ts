@@ -14,6 +14,8 @@ export async function forwardOllama(ctx: ForwardContext): Promise<ProviderResult
     model: modelName
   };
 
+  const isStreaming = ctx.body?.stream === true;
+
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -22,6 +24,20 @@ export async function forwardOllama(ctx: ForwardContext): Promise<ProviderResult
     });
 
     const statusCode = res.status;
+
+    if (isStreaming && res.ok && res.body) {
+      return {
+        statusCode,
+        body: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        isStream: true,
+        streamResponse: res
+      };
+    }
+
     const body: any = await res.json().catch(() => ({}));
 
     if (!res.ok) {

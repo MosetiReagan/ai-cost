@@ -272,5 +272,54 @@ describe('AI Cost Gateway', () => {
     expect(body.choices[0].message.content).toBe('Local Ollama response');
     expect(res.headers['x-ai-cost-estimated-cost']).toBe('0.000000');
   });
+
+  it('supports streaming responses and extracts tokens from SSE stream', async () => {
+    const ssePayload = [
+      'data: {"id":"chatcmpl-stream-1","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
+      'data: {"id":"chatcmpl-stream-1","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}\n\n',
+      'data: {"id":"chatcmpl-stream-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":25,"completion_tokens":10,"total_tokens":35}}\n\n',
+      'data: [DONE]\n\n'
+    ].join('');
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(ssePayload));
+        controller.close();
+      }
+    });
+
+    global.fetch = vi.fn().mockImplementation(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' }
+      });
+    });
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      headers: {
+        authorization: `Bearer ${validRawKey}`,
+        'x-provider-api-key': 'sk-mock-key'
+      },
+      payload: {
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Stream test' }],
+        stream: true
+      }
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.body).toContain('Hello');
+    expect(res.body).toContain(' world');
+
+    await queue.flush();
+    const requests = await repo.listRequests({ projectId });
+    const streamedReq = requests.data.find(r => r.inputTokens === 25);
+    expect(streamedReq).toBeDefined();
+    expect(streamedReq?.outputTokens).toBe(10);
+  });
 });
 

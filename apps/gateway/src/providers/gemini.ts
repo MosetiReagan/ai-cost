@@ -9,7 +9,10 @@ export async function forwardGemini(ctx: ForwardContext): Promise<ProviderResult
     modelName = modelName.replace('gemini/', '');
   }
 
-  const url = `${baseUrl}/${modelName}:generateContent`;
+  const isStreaming = ctx.body?.stream === true;
+  const url = isStreaming
+    ? `${baseUrl}/${modelName}:streamGenerateContent?alt=sse`
+    : `${baseUrl}/${modelName}:generateContent`;
 
   const rawMessages: any[] = ctx.body.messages || [];
   let systemInstruction: any = undefined;
@@ -56,6 +59,105 @@ export async function forwardGemini(ctx: ForwardContext): Promise<ProviderResult
     });
 
     const statusCode = res.status;
+
+    if (isStreaming && res.ok && res.body) {
+      const geminiReader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let buffer = '';
+      const messageId = `chatcmpl-${ctx.requestId}`;
+      const created = Math.floor(Date.now() / 1000);
+      let promptTokens = 0;
+      let candidateTokens = 0;
+
+      const stream = new ReadableStream({
+        async pull(controller) {
+          while (true) {
+            const { done, value } = await geminiReader.read();
+            if (done) {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const dataStr = trimmed.slice(5).trim();
+              if (!dataStr || dataStr === '[DONE]') continue;
+
+              try {
+                const event = JSON.parse(dataStr);
+                if (event.usageMetadata) {
+                  promptTokens = event.usageMetadata.promptTokenCount ?? promptTokens;
+                  candidateTokens = event.usageMetadata.candidatesTokenCount ?? candidateTokens;
+                }
+                const candidate = event.candidates?.[0];
+                const text = candidate?.content?.parts?.[0]?.text;
+                const finishReason = candidate?.finishReason === 'STOP' ? 'stop' : (candidate?.finishReason || null);
+
+                if (text) {
+                  const chunk = {
+                    id: messageId,
+                    object: 'chat.completion.chunk',
+                    created,
+                    model: ctx.model,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: text },
+                        finish_reason: null
+                      }
+                    ]
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                }
+
+                if (finishReason) {
+                  const chunk = {
+                    id: messageId,
+                    object: 'chat.completion.chunk',
+                    created,
+                    model: ctx.model,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {},
+                        finish_reason: finishReason
+                      }
+                    ],
+                    usage: {
+                      prompt_tokens: promptTokens,
+                      completion_tokens: candidateTokens,
+                      total_tokens: promptTokens + candidateTokens
+                    }
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      });
+
+      return {
+        statusCode,
+        body: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        isStream: true,
+        streamResponse: new Response(stream)
+      };
+    }
+
     const body: any = await res.json().catch(() => ({}));
 
     if (!res.ok) {

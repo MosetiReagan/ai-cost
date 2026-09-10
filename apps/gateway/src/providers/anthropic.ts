@@ -27,6 +27,7 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
     modelName = modelName.replace('anthropic/', '');
   }
 
+  const isStreaming = ctx.body?.stream === true;
   const payload: any = {
     model: modelName,
     messages: anthropicMessages.length > 0 ? anthropicMessages : [{ role: 'user', content: 'Hello' }],
@@ -35,6 +36,9 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
   };
   if (systemPrompt) {
     payload.system = systemPrompt;
+  }
+  if (isStreaming) {
+    payload.stream = true;
   }
 
   const headers: Record<string, string> = {
@@ -53,6 +57,103 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
     });
 
     const statusCode = res.status;
+
+    if (isStreaming && res.ok && res.body) {
+      const anthropicReader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let buffer = '';
+      const messageId = `chatcmpl-${ctx.requestId}`;
+      const created = Math.floor(Date.now() / 1000);
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      const stream = new ReadableStream({
+        async pull(controller) {
+          while (true) {
+            const { done, value } = await anthropicReader.read();
+            if (done) {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const dataStr = trimmed.slice(5).trim();
+              if (!dataStr || dataStr === '[DONE]') continue;
+
+              try {
+                const event = JSON.parse(dataStr);
+                if (event.type === 'message_start' && event.message) {
+                  if (event.message.usage?.input_tokens) {
+                    inputTokens = event.message.usage.input_tokens;
+                  }
+                } else if (event.type === 'content_block_delta' && event.delta?.text) {
+                  const chunk = {
+                    id: messageId,
+                    object: 'chat.completion.chunk',
+                    created,
+                    model: ctx.model,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { content: event.delta.text },
+                        finish_reason: null
+                      }
+                    ]
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                } else if (event.type === 'message_delta') {
+                  if (event.usage?.output_tokens) {
+                    outputTokens = event.usage.output_tokens;
+                  }
+                  const finishReason = event.delta?.stop_reason === 'end_turn' ? 'stop' : (event.delta?.stop_reason || null);
+                  const chunk = {
+                    id: messageId,
+                    object: 'chat.completion.chunk',
+                    created,
+                    model: ctx.model,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {},
+                        finish_reason: finishReason
+                      }
+                    ],
+                    usage: {
+                      prompt_tokens: inputTokens,
+                      completion_tokens: outputTokens,
+                      total_tokens: inputTokens + outputTokens
+                    }
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      });
+
+      return {
+        statusCode,
+        body: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        isStream: true,
+        streamResponse: new Response(stream)
+      };
+    }
+
     const body: any = await res.json().catch(() => ({}));
 
     if (!res.ok) {

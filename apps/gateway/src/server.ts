@@ -105,6 +105,90 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       requestId
     });
 
+    if (result.isStream && result.streamResponse?.body) {
+      reply.raw.writeHead(result.statusCode, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'x-ai-cost-request-id': requestId
+      });
+
+      let accumulated = '';
+      let streamInputTokens = result.inputTokens;
+      let streamOutputTokens = result.outputTokens;
+      let streamCachedTokens = result.cachedTokens;
+
+      const reader = result.streamResponse.body.getReader();
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          reply.raw.write(value);
+          const chunkStr = decoder.decode(value, { stream: true });
+          accumulated += chunkStr;
+
+          const lines = accumulated.split('\n');
+          accumulated = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const dataContent = trimmed.slice(5).trim();
+            if (dataContent === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(dataContent);
+              if (parsed.usage) {
+                streamInputTokens = parsed.usage.prompt_tokens ?? streamInputTokens;
+                streamOutputTokens = parsed.usage.completion_tokens ?? streamOutputTokens;
+                streamCachedTokens = parsed.usage.prompt_tokens_details?.cached_tokens ?? streamCachedTokens;
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // stream completed or aborted
+      } finally {
+        reply.raw.end();
+      }
+
+      const latencyMs = Date.now() - startTime;
+      const customPricing = await repo.listCustomPricing().catch(() => []);
+      const costBreakdown = calculateCost({
+        provider,
+        model,
+        inputTokens: streamInputTokens,
+        outputTokens: streamOutputTokens,
+        cachedTokens: streamCachedTokens,
+        customPricing
+      });
+
+      const usageRecord: AIRequestUsage = {
+        id: randomUUID(),
+        requestId,
+        projectId: auth.projectId,
+        provider,
+        model,
+        inputTokens: streamInputTokens,
+        outputTokens: streamOutputTokens,
+        cachedTokens: streamCachedTokens,
+        totalTokens: streamInputTokens + streamOutputTokens,
+        estimatedCost: costBreakdown.totalCost,
+        latencyMs,
+        statusCode: result.statusCode,
+        status: result.statusCode < 400 ? 'success' : 'error',
+        errorMessage: result.errorMessage,
+        environment,
+        timestamp: new Date()
+      };
+
+      queue.enqueue(usageRecord);
+      return;
+    }
+
     const latencyMs = Date.now() - startTime;
 
     // Retrieve custom pricing if exists

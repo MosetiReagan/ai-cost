@@ -6,6 +6,8 @@ export interface ProviderResult {
   cachedTokens: number;
   rawUsageAvailable: boolean;
   errorMessage?: string;
+  isStream?: boolean;
+  streamResponse?: Response;
 }
 
 export interface ForwardContext {
