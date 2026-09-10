@@ -4,7 +4,7 @@ import jwt from '@fastify/jwt';
 import { Repository } from '@ai-cost/database';
 import { calculateCost, MODEL_CATALOG } from '@ai-cost/pricing';
 import { ModelPricing } from '@ai-cost/types';
-import { hashPassword, verifyPassword, generateApiKey, hashApiKey } from './auth.js';
+import { hashPassword, verifyPassword, generateApiKey, hashApiKey, DUMMY_PASSWORD_HASH } from './auth.js';
 
 export interface ApiServerOptions {
   repo: Repository;
@@ -164,12 +164,8 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     }
 
     const user = await repo.getUserByEmail(email);
-    if (!user) {
-      return reply.status(401).send({ error: 'Invalid email or password.' });
-    }
-
-    const isValid = await verifyPassword(password, user.password_hash);
-    if (!isValid) {
+    const isValid = await verifyPassword(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !isValid) {
       return reply.status(401).send({ error: 'Invalid email or password.' });
     }
 
