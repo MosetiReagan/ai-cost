@@ -23,8 +23,19 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     bodyLimit: 10 * 1024 * 1024 // 10MB limit
   });
 
+  const allowedGatewayOrigins = (process.env.CORS_ORIGINS || '*')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
   server.register(cors, {
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin || allowedGatewayOrigins.includes('*') || allowedGatewayOrigins.includes(origin)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Not allowed by CORS'), false);
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-ai-cost-key', 'x-provider-api-key', 'x-provider', 'x-environment', 'x-request-id']
   });

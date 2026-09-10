@@ -27,10 +27,22 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
     logger: options.logger ?? false
   });
 
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
   server.register(cors, {
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Not allowed by CORS'), false);
+      }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-ai-cost-key', 'x-requested-with']
   });
 
   server.register(jwt, {
