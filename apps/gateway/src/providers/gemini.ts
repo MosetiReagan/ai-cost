@@ -1,0 +1,123 @@
+import { ForwardContext, ProviderResult } from './types.js';
+
+export async function forwardGemini(ctx: ForwardContext): Promise<ProviderResult> {
+  const apiKey = ctx.providerApiKey || process.env.GEMINI_API_KEY || '';
+  const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/models').replace(/\/$/, '');
+
+  let modelName = ctx.model;
+  if (modelName.startsWith('gemini/')) {
+    modelName = modelName.replace('gemini/', '');
+  }
+
+  const url = `${baseUrl}/${modelName}:generateContent${apiKey ? `?key=${apiKey}` : ''}`;
+
+  const rawMessages: any[] = ctx.body.messages || [];
+  let systemInstruction: any = undefined;
+  const contents: any[] = [];
+
+  for (const msg of rawMessages) {
+    if (msg.role === 'system') {
+      systemInstruction = {
+        parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }]
+      };
+    } else {
+      contents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }]
+      });
+    }
+  }
+
+  const payload: any = {
+    contents: contents.length > 0 ? contents : [{ role: 'user', parts: [{ text: 'Hello' }] }]
+  };
+  if (systemInstruction) {
+    payload.systemInstruction = systemInstruction;
+  }
+  if (ctx.body.temperature !== undefined) {
+    payload.generationConfig = {
+      temperature: ctx.body.temperature,
+      maxOutputTokens: ctx.body.max_tokens
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const statusCode = res.status;
+    const body: any = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return {
+        statusCode,
+        body: {
+          error: {
+            message: body?.error?.message || `Gemini returned HTTP ${statusCode}`,
+            type: 'upstream_error'
+          }
+        },
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        errorMessage: body?.error?.message || `HTTP ${statusCode}`
+      };
+    }
+
+    const usage = body?.usageMetadata;
+    const inputTokens = usage?.promptTokenCount ?? 0;
+    const outputTokens = usage?.candidatesTokenCount ?? 0;
+    const cachedTokens = usage?.cachedContentTokenCount ?? 0;
+
+    const candidate = body?.candidates?.[0];
+    const textContent = candidate?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+
+    const openAIFormattedBody = {
+      id: `chatcmpl-${ctx.requestId}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: ctx.model,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: textContent
+          },
+          finish_reason: candidate?.finishReason === 'STOP' ? 'stop' : 'length'
+        }
+      ],
+      usage: {
+        prompt_tokens: inputTokens,
+        completion_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+        prompt_tokens_details: {
+          cached_tokens: cachedTokens
+        }
+      }
+    };
+
+    return {
+      statusCode,
+      body: openAIFormattedBody,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      rawUsageAvailable: !!usage
+    };
+  } catch (err: any) {
+    return {
+      statusCode: 502,
+      body: { error: { message: `Gateway failed to reach Gemini: ${err.message}`, type: 'gateway_error' } },
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      rawUsageAvailable: false,
+      errorMessage: err.message
+    };
+  }
+}

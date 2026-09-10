@@ -1,0 +1,38 @@
+{
+  "name": "ai-cost-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open-source AI usage, cost, latency, and model observability for developers.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:gateway": "npm run dev --workspace=@ai-cost/gateway",
+    "dev:api": "npm run dev --workspace=@ai-cost/api",
+    "dev:dashboard": "npm run dev --workspace=@ai-cost/dashboard",
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "lint": "eslint . --max-warnings 0",
+    "seed": "tsx scripts/seed.ts",
+    "cli": "tsx scripts/cli.ts",
+    "ai-cost": "tsx scripts/cli.ts",
+    "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules apps/*/dist apps/*/node_modules apps/dashboard/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "eslint": "^9.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "AI Cost Contributors",
+  "license": "MIT",
+  "type": "module"
+}
