@@ -556,7 +556,7 @@ export class Repository {
     });
   }
 
-  async getCostInsights(filter: { projectId?: string }): Promise<CostInsight[]> {
+  async getCostInsights(filter: { projectId?: string; projectIds?: string[] }): Promise<CostInsight[]> {
     const insights: CostInsight[] = [];
     const overview = await this.getOverviewMetrics(filter);
     const models = await this.getSpendByModel(filter);
