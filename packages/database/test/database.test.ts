@@ -165,4 +165,46 @@ describe('Database & Aggregation Engine', () => {
     const hasCacheInsight = insights.some(i => i.id === 'prompt-caching');
     expect(hasCacheInsight).toBe(true);
   });
+
+  it('inserts multiple requests in a single batch operation', async () => {
+    const projects = await repo.listProjects((await repo.getOrganizationBySlug('acme-ai')).id);
+    const projectId = projects[0].id;
+
+    await repo.batchRecordRequests([
+      {
+        requestId: 'batch-req-1',
+        projectId,
+        provider: 'openai',
+        model: 'gpt-4o',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        estimatedCost: 0.0005,
+        latencyMs: 200,
+        statusCode: 200,
+        status: 'success'
+      },
+      {
+        requestId: 'batch-req-2',
+        projectId,
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        inputTokens: 200,
+        outputTokens: 100,
+        totalTokens: 300,
+        estimatedCost: 0.0015,
+        latencyMs: 300,
+        statusCode: 200,
+        status: 'success'
+      }
+    ]);
+
+    const res = await repo.listRequests({ projectId, limit: 10 });
+    const batchReq1 = res.data.find(r => r.requestId === 'batch-req-1');
+    const batchReq2 = res.data.find(r => r.requestId === 'batch-req-2');
+    expect(batchReq1).toBeDefined();
+    expect(batchReq2).toBeDefined();
+    expect(batchReq1?.totalTokens).toBe(150);
+    expect(batchReq2?.totalTokens).toBe(300);
+  });
 });

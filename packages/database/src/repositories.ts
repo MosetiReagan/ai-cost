@@ -259,17 +259,75 @@ export class Repository {
       ]
     );
 
-    // Update budget spend asynchronously
-    this.checkAndUpdateBudget(usage.projectId, usage.estimatedCost).catch(err => {
+    // Update budget spend
+    try {
+      await this.checkAndUpdateBudget(usage.projectId, usage.estimatedCost);
+    } catch (err) {
       console.error('[ai-cost/database] Failed to update budget:', err);
-    });
+    }
 
     return id;
   }
 
   async batchRecordRequests(usages: AIRequestUsage[]): Promise<void> {
+    if (usages.length === 0) return;
+
+    const values: unknown[] = [];
+    const rowPlaceholders: string[] = [];
+    let pIdx = 1;
+
     for (const u of usages) {
-      await this.recordRequest(u);
+      const id = u.id || randomUUID();
+      const tagsJson = u.tags ? JSON.stringify(u.tags) : null;
+      const ts = u.timestamp || new Date();
+
+      rowPlaceholders.push(
+        `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
+      );
+
+      values.push(
+        id,
+        u.requestId,
+        u.projectId,
+        u.provider.toLowerCase(),
+        u.model.toLowerCase(),
+        u.inputTokens,
+        u.outputTokens,
+        u.cachedTokens || 0,
+        u.totalTokens,
+        u.estimatedCost,
+        u.latencyMs,
+        u.statusCode || 200,
+        u.status,
+        u.errorMessage || null,
+        tagsJson,
+        u.userId || null,
+        u.environment || 'production',
+        ts
+      );
+    }
+
+    const sql = `INSERT INTO requests (
+      id, request_id, project_id, provider, model,
+      input_tokens, output_tokens, cached_tokens, total_tokens,
+      estimated_cost, latency_ms, status_code, status,
+      error_message, tags, user_id, environment, timestamp
+    ) VALUES ${rowPlaceholders.join(', ')}`;
+
+    await this.db.query(sql, values);
+
+    // Update budgets grouped by project
+    const spendByProject = new Map<string, number>();
+    for (const u of usages) {
+      spendByProject.set(u.projectId, (spendByProject.get(u.projectId) ?? 0) + u.estimatedCost);
+    }
+
+    for (const [projectId, incrementalCost] of spendByProject.entries()) {
+      try {
+        await this.checkAndUpdateBudget(projectId, incrementalCost);
+      } catch (err) {
+        console.error('[ai-cost/database] Failed to update budget in batch:', err);
+      }
     }
   }
 

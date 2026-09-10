@@ -116,6 +116,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     });
 
     if (result.isStream && result.streamResponse?.body) {
+      reply.hijack();
       reply.raw.writeHead(result.statusCode, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',

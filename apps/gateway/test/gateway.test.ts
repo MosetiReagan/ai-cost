@@ -38,9 +38,13 @@ describe('AI Cost Gateway', () => {
     await server.ready();
   });
 
+  const originalFetch = global.fetch;
+
   afterAll(async () => {
-    await server.close();
+    global.fetch = originalFetch;
     await queue.stop();
+    await server.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await db.close();
   });
 
