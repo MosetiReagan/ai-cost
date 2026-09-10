@@ -20,10 +20,25 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   const { repo } = options;
   const queue = options.queue || new UsageQueue(repo);
 
+  const trustProxy = process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production';
   const server = Fastify({
     logger: options.logger ?? false,
-    bodyLimit: 10 * 1024 * 1024 // 10MB limit
+    bodyLimit: 10 * 1024 * 1024, // 10MB limit
+    trustProxy
   });
+
+  if (process.env.NODE_ENV === 'production' && process.env.ENFORCE_HTTPS !== 'false') {
+    server.addHook('onRequest', async (request, reply) => {
+      const proto = request.headers['x-forwarded-proto'];
+      if (proto && proto === 'http') {
+        if (request.method === 'GET') {
+          const host = request.headers.host || 'localhost';
+          return reply.redirect(`https://${host}${request.raw.url || ''}`, 308);
+        }
+        return reply.status(403).send({ error: 'Insecure transport. HTTPS is required in production.' });
+      }
+    });
+  }
 
   const effectiveRateLimitMax = options.rateLimitMax ?? Number(process.env.RATE_LIMIT_PER_MINUTE ?? 600);
 

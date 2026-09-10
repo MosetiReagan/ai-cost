@@ -235,4 +235,59 @@ describe('AI Cost API Server', () => {
       if (originalSecret) process.env.JWT_SECRET = originalSecret;
     }
   });
+
+  it('enforces HTTPS and rejects insecure HTTP transport in production', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    const originalSecret = process.env.JWT_SECRET;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.JWT_SECRET = 'a-very-long-production-jwt-secret-for-testing-12345';
+      const prodServer = buildApiServer({ repo, logger: false });
+      await prodServer.ready();
+
+      // Insecure POST should be rejected with 403
+      const insecurePost = await prodServer.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: {
+          'x-forwarded-proto': 'http',
+          'content-type': 'application/json'
+        },
+        payload: { email: 'admin@test.org', password: 'securepassword123' }
+      });
+      expect(insecurePost.statusCode).toBe(403);
+      expect(JSON.parse(insecurePost.body).error).toMatch(/HTTPS is required/);
+
+      // Insecure GET should redirect with 308
+      const insecureGet = await prodServer.inject({
+        method: 'GET',
+        url: '/health',
+        headers: {
+          'x-forwarded-proto': 'http',
+          'host': 'api.aicost.dev'
+        }
+      });
+      expect(insecureGet.statusCode).toBe(308);
+      expect(insecureGet.headers.location).toBe('https://api.aicost.dev/health');
+
+      // Secure HTTPS proceeds
+      const secureGet = await prodServer.inject({
+        method: 'GET',
+        url: '/health',
+        headers: {
+          'x-forwarded-proto': 'https'
+        }
+      });
+      expect(secureGet.statusCode).toBe(200);
+
+      await prodServer.close();
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalSecret) {
+        process.env.JWT_SECRET = originalSecret;
+      } else {
+        delete process.env.JWT_SECRET;
+      }
+    }
+  });
 });

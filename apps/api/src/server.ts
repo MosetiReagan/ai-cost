@@ -23,9 +23,24 @@ export function buildApiServer(options: ApiServerOptions): FastifyInstance {
   }
   const effectiveJwtSecret = rawJwtSecret || 'ai-cost-dev-insecure-jwt-secret-do-not-use-in-production';
 
+  const trustProxy = process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production';
   const server = Fastify({
-    logger: options.logger ?? false
+    logger: options.logger ?? false,
+    trustProxy
   });
+
+  if (process.env.NODE_ENV === 'production' && process.env.ENFORCE_HTTPS !== 'false') {
+    server.addHook('onRequest', async (request, reply) => {
+      const proto = request.headers['x-forwarded-proto'];
+      if (proto && proto === 'http') {
+        if (request.method === 'GET') {
+          const host = request.headers.host || 'localhost';
+          return reply.redirect(`https://${host}${request.raw.url || ''}`, 308);
+        }
+        return reply.status(403).send({ error: 'Insecure transport. HTTPS is required in production.' });
+      }
+    });
+  }
 
   const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
     .split(',')
