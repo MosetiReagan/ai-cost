@@ -321,5 +321,30 @@ describe('AI Cost Gateway', () => {
     expect(streamedReq).toBeDefined();
     expect(streamedReq?.outputTokens).toBe(10);
   });
+
+  it('handles upstream timeout gracefully with 504 status code', async () => {
+    global.fetch = vi.fn().mockImplementation(async () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      throw error;
+    });
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      headers: {
+        authorization: `Bearer ${validRawKey}`,
+        'x-provider-api-key': 'sk-mock-key'
+      },
+      payload: {
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Timeout test' }]
+      }
+    });
+
+    expect(res.statusCode).toBe(504);
+    const body = JSON.parse(res.body);
+    expect(body.error.type).toBe('gateway_timeout');
+  });
 });
 

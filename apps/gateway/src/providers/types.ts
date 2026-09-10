@@ -16,3 +16,5 @@ export interface ForwardContext {
   providerApiKey?: string;
   requestId: string;
 }
+
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 60_000);

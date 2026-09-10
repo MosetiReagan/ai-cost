@@ -18,11 +18,16 @@ export async function forwardOpenAI(ctx: ForwardContext): Promise<ProviderResult
     requestBody.stream_options = { include_usage: true };
   }
 
+  const timeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 60_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     });
 
     const statusCode = res.status;
@@ -68,6 +73,17 @@ export async function forwardOpenAI(ctx: ForwardContext): Promise<ProviderResult
       rawUsageAvailable: !!usage
     };
   } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return {
+        statusCode: 504,
+        body: { error: { message: `Gateway timed out waiting for OpenAI after ${timeoutMs}ms`, type: 'gateway_timeout' } },
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        errorMessage: `Upstream timed out after ${timeoutMs}ms`
+      };
+    }
     return {
       statusCode: 502,
       body: { error: { message: `Gateway failed to reach OpenAI: ${err.message}`, type: 'gateway_error' } },
@@ -77,5 +93,7 @@ export async function forwardOpenAI(ctx: ForwardContext): Promise<ProviderResult
       rawUsageAvailable: false,
       errorMessage: err.message
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }

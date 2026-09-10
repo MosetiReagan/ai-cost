@@ -15,12 +15,16 @@ export async function forwardOllama(ctx: ForwardContext): Promise<ProviderResult
   };
 
   const isStreaming = ctx.body?.stream === true;
+  const timeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 60_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
 
     const statusCode = res.status;
@@ -65,6 +69,17 @@ export async function forwardOllama(ctx: ForwardContext): Promise<ProviderResult
       rawUsageAvailable: !!usage
     };
   } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return {
+        statusCode: 504,
+        body: { error: { message: `Gateway timed out waiting for Ollama after ${timeoutMs}ms`, type: 'gateway_timeout' } },
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        errorMessage: `Upstream timed out after ${timeoutMs}ms`
+      };
+    }
     return {
       statusCode: 502,
       body: { error: { message: `Gateway failed to reach local Ollama: ${err.message}`, type: 'gateway_error' } },
@@ -74,5 +89,7 @@ export async function forwardOllama(ctx: ForwardContext): Promise<ProviderResult
       rawUsageAvailable: false,
       errorMessage: err.message
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }

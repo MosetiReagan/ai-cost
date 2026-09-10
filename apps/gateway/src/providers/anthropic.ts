@@ -49,11 +49,16 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
     headers['x-api-key'] = apiKey;
   }
 
+  const timeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 60_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
 
     const statusCode = res.status;
@@ -213,6 +218,17 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
       rawUsageAvailable: true
     };
   } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return {
+        statusCode: 504,
+        body: { error: { message: `Gateway timed out waiting for Anthropic after ${timeoutMs}ms`, type: 'gateway_timeout' } },
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        rawUsageAvailable: false,
+        errorMessage: `Upstream timed out after ${timeoutMs}ms`
+      };
+    }
     return {
       statusCode: 502,
       body: { error: { message: `Gateway failed to reach Anthropic: ${err.message}`, type: 'gateway_error' } },
@@ -222,5 +238,7 @@ export async function forwardAnthropic(ctx: ForwardContext): Promise<ProviderRes
       rawUsageAvailable: false,
       errorMessage: err.message
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
