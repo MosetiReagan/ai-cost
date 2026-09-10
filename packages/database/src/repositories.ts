@@ -393,10 +393,10 @@ export class Repository {
 
   // --- Analytics Aggregations ---
 
-  private buildFilterClauses(filter: { projectId?: string; projectIds?: string[]; startDate?: Date; endDate?: Date; provider?: string; model?: string }) {
+  private buildFilterClauses(filter: { projectId?: string; projectIds?: string[]; startDate?: Date; endDate?: Date; provider?: string; model?: string }, startIdx: number = 1) {
     const conditions: string[] = [];
     const params: any[] = [];
-    let pIdx = 1;
+    let pIdx = startIdx;
 
     if (filter.projectId) {
       conditions.push(`project_id = $${pIdx++}`);
@@ -465,23 +465,23 @@ export class Repository {
     };
   }
 
-  async getSpendOverTime(filter: { projectId?: string; startDate?: Date; endDate?: Date; interval?: 'hour' | 'day' }): Promise<SpendBucket[]> {
-    const { where, params } = this.buildFilterClauses(filter);
-    const dateTrunc = filter.interval === 'hour' ? 'hour' : 'day';
+  async getSpendOverTime(filter: { projectId?: string; projectIds?: string[]; startDate?: Date; endDate?: Date; interval?: 'hour' | 'day' }): Promise<SpendBucket[]> {
+    const interval: 'hour' | 'day' = filter.interval === 'hour' ? 'hour' : 'day';
+    const { where, params } = this.buildFilterClauses(filter, 2);
 
     const sql = `
       SELECT
-        TO_CHAR(DATE_TRUNC('${dateTrunc}', timestamp), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as bucket,
+        TO_CHAR(DATE_TRUNC($1, timestamp), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as bucket,
         COALESCE(SUM(estimated_cost), 0)::float as cost,
         COUNT(*)::int as requests,
         COALESCE(SUM(total_tokens), 0)::bigint as tokens
       FROM requests
       ${where}
-      GROUP BY DATE_TRUNC('${dateTrunc}', timestamp)
-      ORDER BY DATE_TRUNC('${dateTrunc}', timestamp) ASC
+      GROUP BY DATE_TRUNC($1, timestamp)
+      ORDER BY DATE_TRUNC($1, timestamp) ASC
     `;
 
-    const res = await this.db.query<any>(sql, params);
+    const res = await this.db.query<any>(sql, [interval, ...params]);
     return res.rows.map(r => ({
       timestamp: r.bucket,
       cost: Number(Number(r.cost).toFixed(4)),
