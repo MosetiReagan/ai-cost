@@ -15,7 +15,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p apps/dashboard/tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "seed": "tsx scripts/seed.ts",
     "cli": "tsx scripts/cli.ts",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ModelPricing } from '../types';
+import { api } from '../api';
 import { Plus, Shield } from 'lucide-react';
 
 export const PricingView: React.FC = () => {
