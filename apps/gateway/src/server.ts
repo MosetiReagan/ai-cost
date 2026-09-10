@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { calculateCost, MODEL_CATALOG } from '@ai-cost/pricing';
 import { Repository } from '@ai-cost/database';
 import { AIRequestUsage } from '@ai-cost/types';
@@ -12,6 +13,7 @@ export interface ServerOptions {
   repo: Repository;
   queue?: UsageQueue;
   logger?: boolean;
+  rateLimitMax?: number;
 }
 
 export function buildServer(options: ServerOptions): FastifyInstance {
@@ -21,6 +23,24 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   const server = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 10 * 1024 * 1024 // 10MB limit
+  });
+
+  const effectiveRateLimitMax = options.rateLimitMax ?? Number(process.env.RATE_LIMIT_PER_MINUTE ?? 600);
+
+  server.register(rateLimit, {
+    max: effectiveRateLimitMax,
+    timeWindow: '1 minute',
+    allowList: [],
+    keyGenerator: (req) => {
+      const auth = (req as any).auth;
+      return auth?.projectId || (req.headers['x-forwarded-for'] as string) || req.ip || 'global';
+    },
+    errorResponseBuilder: (_request, context) => {
+      const err: any = new Error(`Rate limit exceeded. Max ${context.max} requests per ${context.after}.`);
+      err.statusCode = 429;
+      err.type = 'rate_limit_error';
+      return err;
+    }
   });
 
   const allowedGatewayOrigins = (process.env.CORS_ORIGINS || '*')
@@ -40,42 +60,43 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     allowedHeaders: ['Content-Type', 'Authorization', 'x-ai-cost-key', 'x-provider-api-key', 'x-provider', 'x-environment', 'x-request-id']
   });
 
-  // Health and Readiness
-  server.get('/health', async () => {
-    return { status: 'ok', service: 'ai-cost-gateway', timestamp: new Date().toISOString() };
-  });
+  server.register(async (app) => {
+    // Health and Readiness
+    app.get('/health', async () => {
+      return { status: 'ok', service: 'ai-cost-gateway', timestamp: new Date().toISOString() };
+    });
 
-  server.get('/ready', async (_, reply) => {
-    try {
-      return { status: 'ready', database: 'connected' };
-    } catch (err: any) {
-      reply.status(503).send({ status: 'not_ready', error: err.message });
-    }
-  });
+    app.get('/ready', async (_, reply) => {
+      try {
+        return { status: 'ready', database: 'connected' };
+      } catch (err: any) {
+        reply.status(503).send({ status: 'not_ready', error: err.message });
+      }
+    });
 
-  // Models catalog in OpenAI format
-  server.get('/v1/models', async () => {
-    const customModels = await repo.listCustomPricing().catch(() => []);
-    const allModels = [...MODEL_CATALOG, ...customModels];
+    // Models catalog in OpenAI format
+    app.get('/v1/models', async () => {
+      const customModels = await repo.listCustomPricing().catch(() => []);
+      const allModels = [...MODEL_CATALOG, ...customModels];
 
-    return {
-      object: 'list',
-      data: allModels.map(m => ({
-        id: m.model,
-        object: 'model',
-        created: 1700000000,
-        owned_by: m.provider,
-        permission: [],
-        root: m.model,
-        parent: null
-      }))
-    };
-  });
+      return {
+        object: 'list',
+        data: allModels.map(m => ({
+          id: m.model,
+          object: 'model',
+          created: 1700000000,
+          owned_by: m.provider,
+          permission: [],
+          root: m.model,
+          parent: null
+        }))
+      };
+    });
 
-  const authMiddleware = createAuthMiddleware(repo);
+    const authMiddleware = createAuthMiddleware(repo);
 
-  // OpenAI-Compatible Chat Completions Endpoint
-  server.post('/v1/chat/completions', { preHandler: [authMiddleware] }, async (request, reply) => {
+    // OpenAI-Compatible Chat Completions Endpoint
+    app.post('/v1/chat/completions', { preHandler: [authMiddleware] }, async (request, reply) => {
     const auth = (request as any).auth;
     const body = request.body as any;
 
@@ -244,6 +265,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     reply.header('x-ai-cost-tokens-total', (result.inputTokens + result.outputTokens).toString());
 
     return reply.status(result.statusCode).send(result.body);
+    });
   });
 
   return server;

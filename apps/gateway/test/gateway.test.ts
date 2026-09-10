@@ -370,5 +370,27 @@ describe('AI Cost Gateway', () => {
     expect(body.error.type).toBe('invalid_request_error');
     expect(body.error.message).toContain('Unknown provider');
   });
+
+  it('enforces request rate limiting with HTTP 429', async () => {
+    const rateLimitedServer = buildServer({ repo, queue, rateLimitMax: 2 });
+    await rateLimitedServer.ready();
+
+    try {
+      const makeReq = () =>
+        rateLimitedServer.inject({
+          method: 'GET',
+          url: '/health'
+        });
+
+      const r1 = await makeReq();
+      const r2 = await makeReq();
+      const r3 = await makeReq();
+      const r4 = await makeReq();
+
+      expect([r1.statusCode, r2.statusCode, r3.statusCode, r4.statusCode]).toContain(429);
+    } finally {
+      await rateLimitedServer.close();
+    }
+  });
 });
 
