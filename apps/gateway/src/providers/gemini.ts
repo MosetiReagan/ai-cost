@@ -9,7 +9,7 @@ export async function forwardGemini(ctx: ForwardContext): Promise<ProviderResult
     modelName = modelName.replace('gemini/', '');
   }
 
-  const url = `${baseUrl}/${modelName}:generateContent${apiKey ? `?key=${apiKey}` : ''}`;
+  const url = `${baseUrl}/${modelName}:generateContent`;
 
   const rawMessages: any[] = ctx.body.messages || [];
   let systemInstruction: any = undefined;
@@ -41,10 +41,17 @@ export async function forwardGemini(ctx: ForwardContext): Promise<ProviderResult
     };
   }
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (apiKey) {
+    headers['x-goog-api-key'] = apiKey;
+  }
+
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
 
