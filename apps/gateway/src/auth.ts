@@ -13,6 +13,53 @@ export function hashKey(rawKey: string): string {
   return createHash('sha256').update(rawKey.trim()).digest('hex');
 }
 
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+export class TTLCache<K, V> {
+  private cache = new Map<K, CacheEntry<V>>();
+
+  constructor(private max: number = 10_000, private defaultTtlMs: number = 60_000) {}
+
+  get(key: K): V | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  set(key: K, value: V, ttlMs = this.defaultTtlMs): void {
+    if (this.cache.size >= this.max) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) this.cache.delete(firstKey);
+    }
+    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  }
+
+  delete(key: K): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+export const apiKeyCache = new TTLCache<string, any>(10_000, 60_000);
+
+export function invalidateApiKeyCache(hashedKey?: string): void {
+  if (hashedKey) {
+    apiKeyCache.delete(hashedKey);
+  } else {
+    apiKeyCache.clear();
+  }
+}
+
 /**
  * Fastify preHandler to authenticate the request against the AI Cost API keys.
  * Supports:
@@ -62,17 +109,21 @@ export function createAuthMiddleware(repo: Repository) {
     }
 
     const hashed = hashKey(aiCostKey);
-    const keyRecord = await repo.getApiKeyByHashedKey(hashed);
+    let keyRecord = apiKeyCache.get(hashed);
 
     if (!keyRecord) {
-      reply.status(401).send({
-        error: {
-          message: 'Invalid or revoked AI Cost API key.',
-          type: 'authentication_error',
-          code: 'invalid_api_key'
-        }
-      });
-      return;
+      keyRecord = await repo.getApiKeyByHashedKey(hashed);
+      if (!keyRecord) {
+        reply.status(401).send({
+          error: {
+            message: 'Invalid or revoked AI Cost API key.',
+            type: 'authentication_error',
+            code: 'invalid_api_key'
+          }
+        });
+        return;
+      }
+      apiKeyCache.set(hashed, keyRecord);
     }
 
     // Asynchronously update last used
