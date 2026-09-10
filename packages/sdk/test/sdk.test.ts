@@ -123,5 +123,49 @@ describe('AICost SDK', () => {
       })
     );
   });
+
+  it('re-queues events on network failure and retries on subsequent flush', async () => {
+    let callCount = 0;
+    let deliveredPayload: any = null;
+
+    global.fetch = vi.fn().mockImplementation(async (url, opts) => {
+      callCount++;
+      if (callCount === 1) {
+        // First flush fails with 503 Service Unavailable
+        return { ok: false, status: 503, statusText: 'Service Unavailable' };
+      }
+      // Second flush succeeds
+      deliveredPayload = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: async () => ({ status: 'ok' }) };
+    });
+
+    const client = new AICost({
+      apiKey: 'ac_test_retry',
+      batchSize: 10,
+      maxRetries: 3
+    });
+
+    await client.track({
+      provider: 'openai',
+      model: 'gpt-4o',
+      inputTokens: 50,
+      outputTokens: 25,
+      latencyMs: 150
+    });
+
+    expect(client.queueLength).toBe(1);
+
+    // First flush fails, event should be re-queued
+    await client.flush();
+    expect(client.queueLength).toBe(1);
+    expect(deliveredPayload).toBeNull();
+
+    // Second flush succeeds
+    await client.flush();
+    expect(client.queueLength).toBe(0);
+    expect(deliveredPayload).not.toBeNull();
+    expect(deliveredPayload.batch.length).toBe(1);
+    expect(deliveredPayload.batch[0].model).toBe('gpt-4o');
+  });
 });
 
