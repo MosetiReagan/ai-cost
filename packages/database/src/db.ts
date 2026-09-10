@@ -4,6 +4,7 @@ import { SCHEMA_SQL } from './schema.js';
 
 export interface QueryResult<T = any> {
   rows: T[];
+  rowCount?: number;
 }
 
 export interface IDatabaseClient {
@@ -25,10 +26,16 @@ class PGliteDatabaseClient implements IDatabaseClient {
       // Use exec for multi-statement DDL/DML scripts
       const results = await this.pglite.exec(sql);
       const last = results[results.length - 1];
-      return { rows: last ? (last.rows as any) : [] };
+      return {
+        rows: last ? (last.rows as any) : [],
+        rowCount: last ? ((last as any).affectedRows ?? last.rows?.length ?? 0) : 0
+      };
     }
     const res = await this.pglite.query<T>(sql, params);
-    return { rows: res.rows };
+    return {
+      rows: res.rows,
+      rowCount: (res as any).affectedRows ?? res.rows.length
+    };
   }
 
   async close(): Promise<void> {
@@ -46,7 +53,10 @@ class PgPoolDatabaseClient implements IDatabaseClient {
 
   async query<T = any>(sql: string, params?: any[]): Promise<QueryResult<T>> {
     const res = await this.pool.query(sql, params);
-    return { rows: res.rows };
+    return {
+      rows: res.rows,
+      rowCount: res.rowCount ?? 0
+    };
   }
 
   async close(): Promise<void> {

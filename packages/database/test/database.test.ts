@@ -232,4 +232,28 @@ describe('Database & Aggregation Engine', () => {
     expect(Number(history[0].input_cost_per_million)).toBe(3.5);
     expect(history[0].source).toBe('custom');
   });
+
+  it('purges old requests using batched chunks', async () => {
+    const projects = await repo.listProjects((await repo.getOrganizationBySlug('acme-ai')).id);
+    const projectId = projects[0].id;
+
+    // Record an old request from 400 days ago
+    await repo.recordRequest({
+      requestId: 'ancient-req',
+      projectId,
+      provider: 'openai',
+      model: 'gpt-4o',
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      estimatedCost: 0.0001,
+      latencyMs: 100,
+      statusCode: 200,
+      status: 'success',
+      timestamp: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000)
+    });
+
+    const purged = await repo.purgeOldRequests(365, 5);
+    expect(purged).toBeGreaterThanOrEqual(1);
+  });
 });

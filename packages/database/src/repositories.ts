@@ -963,10 +963,26 @@ export class Repository {
 
   // --- Retention & Cleanup ---
 
-  async purgeOldRequests(daysToKeep: number): Promise<number> {
+  async purgeOldRequests(daysToKeep: number, batchSize = 10_000): Promise<number> {
     if (daysToKeep <= 0) return 0;
     const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000);
-    const res = await this.db.query(`DELETE FROM requests WHERE timestamp < $1`, [cutoff]);
-    return res.rows.length;
+
+    let totalDeleted = 0;
+
+    while (true) {
+      const res = await this.db.query(
+        `DELETE FROM requests
+         WHERE id IN (
+           SELECT id FROM requests WHERE timestamp < $1 LIMIT $2
+         )`,
+        [cutoff, batchSize]
+      );
+      const deleted = res.rowCount ?? res.rows.length ?? 0;
+      totalDeleted += deleted;
+      if (deleted < batchSize) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    return totalDeleted;
   }
 }
