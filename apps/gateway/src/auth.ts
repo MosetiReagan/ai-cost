@@ -51,6 +51,7 @@ export class TTLCache<K, V> {
 }
 
 export const apiKeyCache = new TTLCache<string, any>(10_000, 60_000);
+export const lastUsedCache = new TTLCache<string, number>(10_000, 60_000);
 
 export function invalidateApiKeyCache(hashedKey?: string): void {
   if (hashedKey) {
@@ -126,8 +127,11 @@ export function createAuthMiddleware(repo: Repository) {
       apiKeyCache.set(hashed, keyRecord);
     }
 
-    // Asynchronously update last used
-    repo.updateApiKeyLastUsed(keyRecord.id).catch(() => {});
+    // Throttle last_used updates to at most once per minute per key to avoid row-level lock contention
+    if (!lastUsedCache.get(keyRecord.id)) {
+      lastUsedCache.set(keyRecord.id, Date.now());
+      repo.updateApiKeyLastUsed(keyRecord.id).catch(() => {});
+    }
 
     (request as any).auth = {
       projectId: keyRecord.projectId,
